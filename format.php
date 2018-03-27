@@ -20,12 +20,10 @@ class Format {
   public static $root = 'article';
 
   public function markdown($text) {
-    
     $prior = null;
     foreach ($this->parse($text) as $block) {
       $prior = $block->render($prior);
     }
-
     return Document::instance()->saveXML();
   }
   
@@ -42,53 +40,72 @@ class Format {
 /****       ****************************************************************************** LEXER */
 class Lexer {
   public $text, $depth, $symbol;
+  // TODO consider an atomic capture that will exit
   static public $blocks = [
     'ListItem'   => '[0-9]+\.|- ',
     'Heading'    => '#{1,6}',
     'Code'       => '`{4}',
     'BlockQuote' => '>',
+    'Rule'       => '-{3,}',
     'Block'      => '[a-z]',
-    'Rule'       => '-{3,}'
   ];
-
+  
   static public function Block(string $line) {
     $exp   = implode('|', array_map(function($regex) { 
       return "({$regex})";
     }, array_values(self::$blocks)));
-
     $key = preg_match("/\s*{$exp}/Ai", $line, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
     
     $match = array_pop($list) ?? [null, 0];
-    $type = array_keys(self::$blocks)[$key];
+    $type  = array_keys(self::$blocks)[$key];
     return new $type(new self($type, $line, ...$match));
   }
 
   public function __construct(string $type, string $line, string $symbol, int $indent) {
-    $this->symbol  = $symbol;
-    $this->text    = substr($line, $indent);
-    $this->depth   = floor($indent/2);
+    $this->symbol = $symbol;
+    $this->text   = substr($line, $indent);
+    $this->depth  = floor($indent/2);
   } 
 }
 
 /****        **************************************************************************** INLINE */
 class Inline {
   private $block;
+  //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
+  public $types = [
+    'Anchor' => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
+    'Strong' => '_{2}',
+    'Italic' => '_',
+    'Mark'   => '=',
+    'Quote'  => '"',
+    'Code'   => '`',
+    'Samp'   => '`{2}',
+    'Strike' => '~{2}',
+    'Abbrev' => '\^{2}',
+  ];
   public function __construct(Block $block) {
     $this->block = $block;
   }
   
   public function inject($elem) {
     $fragment = $elem->ownerDocument->createDocumentFragment();
-    $fragment->appendXML($this->block->getValue());
+    $fragment->appendXML($this->parse($this->block->getValue()));
     return $elem->appendChild($fragment);
+  }
+  
+  public function parse($text) {
+    while(preg_match('/(?:(!?)\[([^\)^\[]+)\]\(([^\)]+)\)(?:\"([^"]+)\")?)|(?:([_*^]{1,2})(.+)(\1))/u', $text, $match, PREG_OFFSET_CAPTURE)) {
+      $text = substr_replace($text, '-'.$match[2][0].'-', $match[0][1], strlen($match[0][0]));
+      print_r($match);
+    }
+    return $text;
   }
 }
 
 /****       ****************************************************************************** BLOCK */
 class Block {
-  public $value, $lexer, $context, $reset = false;
-
-  protected $name = 'p';
+  public $value, $lexer, $reset = false, $context = null;
+  protected $name = 'p', $type = null;
     
   public function __construct($lexer) {
     $this->lexer = $lexer;
@@ -96,13 +113,14 @@ class Block {
   }
   
   public function render(Block $previous = null): Block {
-    if ($previous === null) {
+
+    if ($previous === null) 
       $this->context =  Document::instance()->documentElement;
-    } elseif ($this->getName() != $previous->getName() && $previous->reset) {
+    else if ($this->getName() != $previous->getName() && $previous->reset)
       $this->context = $previous->reset;
-    } else {
+    else 
       $this->context = $previous->context;
-    }
+
     $this->value->inject($this->context->appendChild(new \DOMElement($this->getName())));
     return $this;
   }
@@ -114,11 +132,20 @@ class Block {
   public function getValue() {
     return $this->lexer->text;
   }
+  
+  public function getType() {
+    return $this->type;
+  }
 }
 
 /****          ************************************************************************ LISTITEM */
 class ListItem extends Block {
-  protected $name = 'li', $type = null;
+  /*
+    TODO see note at the render method. consider a Tree object, or some way to move up/down syntactically
+  */
+  const UP   = 1;
+  const DOWN = -1;
+  protected $name = 'li';
   public function getValue() {
     return trim(substr($this->lexer->text, strlen($this->lexer->symbol)));
   }
@@ -132,40 +159,37 @@ class ListItem extends Block {
     return $context->appendChild(new \DOMElement($this->getType()));
   }
   
+  public function climb(int $distance) {
+    echo "---- climb {$distance} ----- \n";
+  }
+  
+  // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
   public function render(Block $previous = null): Block {
     $this->reset = $previous->reset;
-    $depth = $this->lexer->depth;
+    $depth       = $this->lexer->depth;
+
+    $this->climb($this->lexer->depth - $previous->lexer->depth);
     
     if ($previous->getName() != 'li') {
-     
       $this->context = $this->makeParent($previous->context);
-      $this->reset = $previous->context;
-    
-    } elseif ($previous->lexer->depth < $depth) { 
-    
+      $this->reset = $previous->context;    
+    } else if ($previous->lexer->depth < $depth) { 
       $this->context = $this->makeParent($previous->context->appendChild(new \DOMElement('li')));
-    
     } elseif ($previous->lexer->depth > $depth) {
-    
       $this->context = $previous->context;
       while($depth++ < $previous->lexer->depth) {
         $this->context = $this->context->parentNode->parentNode;
       }
-      
       if ($this->getType() != $this->context->nodeName) {
-        $this->context = $this->makeParent($this->context->parentNode);
-        
+        // will break if indentation is sloppy
+        $this->context = $this->makeParent($this->context->parentNode);  
       }
-      
     } elseif ($this->getType() != $previous->getType()) {
-    
       $this->context = $this->makeParent($previous->context->parentNode);
-    
     } else {
-    
       $this->context = $previous->context;
-    
     }
+    
     $this->value->inject($this->context->appendChild(new \DOMElement('li')));
     return $this;
   }
@@ -177,7 +201,6 @@ class Heading extends Block {
     if ($this->name[0] != 'h') {
       $this->name = "h" . strlen($this->lexer->symbol);
     }
-    
     return $this->name;
   }
   
@@ -215,10 +238,10 @@ $test = <<<EOD
 - unordered one
 - unordered two
   
-this is some paragraph <strong>text</strong> with **strong**
+this is some paragraph <strong>text</strong> with **strong** and this is a [![img](http://sometthing.com)](http://example.com) and another [thing](http://whatever.com) and then I'm finding some more [text](to link to)"something great"
 
 EOD;
 
-echo (new Format)->markdown($test);
+echo "\n".(new Format)->markdown($test);
 
 ?>
