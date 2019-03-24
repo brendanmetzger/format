@@ -10,6 +10,7 @@ class Document {
       $doc = new \DOMDocument;
       $doc->formatOutput = true;
       $doc->loadXML('<'.Format::$root.'/>');
+                  //sprintf('<%s/>', Format::$root);
     }
     return $doc;
   }
@@ -42,8 +43,8 @@ class Lexer {
   public $text, $depth, $symbol;
   // TODO consider an atomic capture that will exit
   static public $blocks = [
-    'ListItem'   => '[0-9]+\.|- ',
-    'Heading'    => '#{1,6}',
+    'li'   => '[0-9]+\.|- ',
+    'h'    => '#{1,6}',
     'Code'       => '`{4}',
     'BlockQuote' => '>',
     'Rule'       => '-{3,}',
@@ -94,6 +95,14 @@ class Inline {
   }
   
   public function parse($text) {
+    
+    foreach ($this->types as $name => $re) {
+      while(preg_match($re, $text, $match, PREG_OFFSET_CAPTURE)) {
+        // continue/break or reset loop after replacing text
+        
+      }
+    }
+    
     while(preg_match('/(?:(!?)\[([^\)^\[]+)\]\(([^\)]+)\)(?:\"([^"]+)\")?)|(?:([_*^]{1,2})(.+)(\1))/u', $text, $match, PREG_OFFSET_CAPTURE)) {
       $text = substr_replace($text, '-'.$match[2][0].'-', $match[0][1], strlen($match[0][0]));
       print_r($match);
@@ -138,8 +147,8 @@ class Block {
   }
 }
 
-/****          ************************************************************************ LISTITEM */
-class ListItem extends Block {
+/****          ******************************************************************************* li */
+class li extends Block {
   /*
     TODO see note at the render method. consider a Tree object, or some way to move up/down syntactically
   */
@@ -195,8 +204,8 @@ class ListItem extends Block {
   }
 }
 
-/****         ************************************************************************** HEADING */
-class Heading extends Block {
+/****         ******************************************************************************** H */
+class h extends Block {
   public function getName() {
     if ($this->name[0] != 'h') {
       $this->name = "h" . strlen($this->lexer->symbol);
