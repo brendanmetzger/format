@@ -1,6 +1,6 @@
 # (DOM)arkdown 
 
-On the bucket-list, a markdown parser that constructs perfectly formated valid DOM objects. From my experience, well-formatted html can be precisely targeted with CSS without the need to go crazy with classes, id's, and other very custom code. This formatter intends to make HTML construction a priority. With a properly created DOM document, xpath, and callbacks can be utilized elegantly for further formatting, for instances if you need to add class and id attributes.
+A markdown parser that constructs perfectly formated valid DOM objects. From my experience, well-formatted html can be precisely targeted with CSS without the need to go crazy with classes, id's, and other very custom code. This formatter intends to make HTML construction a priority. With a properly created DOM document, xpath, and callbacks can be utilized elegantly for further formatting (like adding class and id attributes).
 
 ## Goals
 
@@ -15,8 +15,8 @@ On the bucket-list, a markdown parser that constructs perfectly formated valid D
 
 #### Needs to be addressed
 
-- [ ] render lists, including nested lists
-- [ ] render headings
+- [x] render lists (including infinitely nested lists)
+- [x] render headings
 - [ ] render links
 - [ ] render images
 - [ ] render blockquotes

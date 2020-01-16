@@ -20,7 +20,7 @@ class Document {
 class Format {
   public static $root = 'article';
 
-  public function markdown($text) {
+  public function load($text) {
     $prior = null;
     foreach ($this->parse($text) as $block) {
       $prior = $block->render($prior);
@@ -29,7 +29,8 @@ class Format {
   }
   
   private function parse(string $text) {
-    $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text);
+    // replace pilcrows and various line breaks with \n, replace tabs with spaces
+    $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text); 
     return array_map('Lexer::Block', array_filter(explode("\n", $filtered), 'Format::notEmpty'));
   }
   
@@ -45,7 +46,7 @@ class Lexer {
   static public $blocks = [
     'li'   => '[0-9]+\.|- ',
     'h'    => '#{1,6}',
-    'Code'       => '`{4}',
+    'Formatted'  => '`{4}',
     'BlockQuote' => '>',
     'Rule'       => '-{3,}',
     'Block'      => '[a-z]',
@@ -75,8 +76,8 @@ class Inline {
   //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
   public $types = [
     'Anchor' => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
-    'Strong' => '_{2}',
-    'Italic' => '_',
+    'Strong' => '[_*]{2}',
+    'Italic' => '[_*]',
     'Mark'   => '=',
     'Quote'  => '"',
     'Code'   => '`',
@@ -84,6 +85,7 @@ class Inline {
     'Strike' => '~{2}',
     'Abbrev' => '\^{2}',
   ];
+  // add sup/sub
   public function __construct(Block $block) {
     $this->block = $block;
   }
@@ -169,7 +171,7 @@ class li extends Block {
   }
   
   public function climb(int $distance) {
-    // echo "---- climb {$distance} ----- \n";
+    echo "---- climb {$distance} ----- \n";
   }
   
   // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
@@ -177,7 +179,7 @@ class li extends Block {
     $this->reset = $previous->reset;
     $depth       = $this->lexer->depth;
 
-    $this->climb($this->lexer->depth - $previous->lexer->depth);
+    // $this->climb($this->lexer->depth - $previous->lexer->depth);
     
     if ($previous->getName() != 'li') {
       $this->context = $this->makeParent($previous->context);
@@ -218,6 +220,20 @@ class h extends Block {
   }
 }
 
-class BlockQuote extends Block {}
-class Code extends Block {}
-class Rule extends Block {}
+class BlockQuote extends Block {
+  protected $name = 'blockquote';
+  
+}
+class Formatted extends Block {
+  protected $name = 'pre';
+}
+class Rule extends Block {
+  protected $name = 'hr';
+}
+
+
+  /* notes:
+  
+  rather than bloat the code with complicated syntax to make things like figure and figcaption, consider contextual callbacks, ie., something like an <hr> followed by a <img> followed by a <p>text</p> would create a <figure><img/><figcaption>text</figcaption></figure>. This would be done using xpath + callbacks, ie addCallback('//hr/following-sibling::img/following-sibling::p, function($doc))
+  
+  */

@@ -22,16 +22,18 @@ $test = <<<EOD
   
 this is some paragraph <strong>text</strong> with **strong** and this is a [![img](http://sometthing.com)](http://example.com) and another [thing](http://whatever.com) and then I'm finding some more [text](to link to)"something great"
 
+> this is a blockquote paragraph "with some quoted text."
+
 EOD;
-echo "------ ORIGINAL --------\n\n\n\n ".$test . "\n\n\n\n";
+// echo "------ ORIGINAL --------\n\n\n\n ".$test . "\n\n\n\n";
 
 
 include('vendor-markdown.php');
-echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text($test) . "\n";
+// echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text($test) . "\n";
 
 
 include('domarkdown.php');
-echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n".(new Format)->markdown($test);
+echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n".(new Format)->load($test);
 
 
 ?>
