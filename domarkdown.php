@@ -97,15 +97,15 @@ class Inline {
   public function parse($text) {
     
     foreach ($this->types as $name => $re) {
-      while(preg_match($re, $text, $match, PREG_OFFSET_CAPTURE)) {
-        // continue/break or reset loop after replacing text
-        
-      }
+      // while(preg_match("/{$re}/u", $text, $match, PREG_OFFSET_CAPTURE)) {
+      //   // continue/break or reset loop after replacing text
+      //
+      // }
     }
     
     while(preg_match('/(?:(!?)\[([^\)^\[]+)\]\(([^\)]+)\)(?:\"([^"]+)\")?)|(?:([_*^]{1,2})(.+)(\1))/u', $text, $match, PREG_OFFSET_CAPTURE)) {
       $text = substr_replace($text, '-'.$match[2][0].'-', $match[0][1], strlen($match[0][0]));
-      print_r($match);
+      // print_r($match);
     }
     return $text;
   }
@@ -169,7 +169,7 @@ class li extends Block {
   }
   
   public function climb(int $distance) {
-    echo "---- climb {$distance} ----- \n";
+    // echo "---- climb {$distance} ----- \n";
   }
   
   // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
@@ -221,36 +221,3 @@ class h extends Block {
 class BlockQuote extends Block {}
 class Code extends Block {}
 class Rule extends Block {}
-
-
-
-
-
-$test = <<<EOD
-  
-# Test h1
-#### Test h4
-####### Test h7 (shouldnt work)
-
-
-1. ordered one
-2. ordered two
-  - nested unordered [one](/url)
-  - nested unordered two
-    - unordered double nested one
-    - unordered double nested two
-      1. orderded triple nested one
-      2. ordered triple nested two 
-    - unordered double nested three
-3. ordered three
-
-- unordered one
-- unordered two
-  
-this is some paragraph <strong>text</strong> with **strong** and this is a [![img](http://sometthing.com)](http://example.com) and another [thing](http://whatever.com) and then I'm finding some more [text](to link to)"something great"
-
-EOD;
-
-echo "\n".(new Format)->markdown($test);
-
-?>
