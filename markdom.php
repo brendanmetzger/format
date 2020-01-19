@@ -2,14 +2,14 @@
 
 // NEXT: parse links
 
-class MarkDOM {
+class XML {
   public static function instance() {
     static $doc = null;
     
     if ($doc === null) {
       $doc = new \DOMDocument;
       $doc->formatOutput = true;
-      $doc->loadXML('<'.Format::$root.'/>');
+      $doc->loadXML('<'.MarkDOM::$root.'/>');
                   //sprintf('<%s/>', Format::$root);
     }
     return $doc;
@@ -17,7 +17,7 @@ class MarkDOM {
 }
 
 /****        ************************************************************************** Format */
-class Format {
+class MarkDOM {
   public static $root = 'article';
 
   public function load($text) {
@@ -25,13 +25,13 @@ class Format {
     foreach ($this->parse($text) as $block) {
       $prior = $block->render($prior);
     }
-    return MarkDOM::instance()->saveXML();
+    return XML::instance()->saveXML();
   }
   
   private function parse(string $text) {
     // replace pilcrows and various line breaks with \n, replace tabs with spaces
     $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text); 
-    return array_map('Lexer::Block', array_filter(explode("\n", $filtered), 'Format::notEmpty'));
+    return array_map('Lexer::Block', array_filter(explode("\n", $filtered), 'MarkDOM::notEmpty'));
   }
   
   public function notEmpty($string) {
@@ -131,7 +131,7 @@ class Block {
   public function render(Block $previous = null): Block {
 
     if ($previous === null) 
-      $this->context =  MarkDOM::instance()->documentElement;
+      $this->context =  XML::instance()->documentElement;
     else if ($this->getName() != $previous->getName() && $previous->reset)
       $this->context = $previous->reset;
     else 

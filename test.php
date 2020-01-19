@@ -32,8 +32,8 @@ include('vendor-markdown.php');
 // echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text($test) . "\n";
 
 
-include('domarkdown.php');
-echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n".(new Format)->load($test);
+include('markdom.php');
+echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n".(new MarkDOM)->load($test);
 
 
 ?>
