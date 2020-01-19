@@ -70,10 +70,12 @@ class Lexer {
   } 
 }
 
+
 /****        **************************************************************************** INLINE */
 class Inline {
   private $block;
   //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
+  private static $symbols = null;
   public $types = [
     'Anchor' => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
     'Strong' => '[_*]{2}',
@@ -88,6 +90,8 @@ class Inline {
   // add sup/sub
   public function __construct(Block $block) {
     $this->block = $block;
+    // php 7.4 allows self::$symbols ??= preg_replace(...)
+    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', array_values($this->types)), 3));
   }
   
   public function inject($elem) {
@@ -99,6 +103,7 @@ class Inline {
   public function parse($text) {
     
     foreach ($this->types as $name => $re) {
+      // print_r($re);
       // while(preg_match("/{$re}/u", $text, $match, PREG_OFFSET_CAPTURE)) {
       //   // continue/break or reset loop after replacing text
       //
