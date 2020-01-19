@@ -2,7 +2,7 @@
 
 // NEXT: parse links
 
-class Document {
+class MarkDOM {
   public static function instance() {
     static $doc = null;
     
@@ -25,7 +25,7 @@ class Format {
     foreach ($this->parse($text) as $block) {
       $prior = $block->render($prior);
     }
-    return Document::instance()->saveXML();
+    return MarkDOM::instance()->saveXML();
   }
   
   private function parse(string $text) {
@@ -126,7 +126,7 @@ class Block {
   public function render(Block $previous = null): Block {
 
     if ($previous === null) 
-      $this->context =  Document::instance()->documentElement;
+      $this->context =  MarkDOM::instance()->documentElement;
     else if ($this->getName() != $previous->getName() && $previous->reset)
       $this->context = $previous->reset;
     else 
