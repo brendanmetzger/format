@@ -23,7 +23,7 @@ Well-formatted html can be precisely targeted with CSS without necessity of clas
 - [ ] render images
 - [ ] render blockquotes
 - [ ] render codeblocks
-- [ ] Parser callbacks (ie, encountering h2 inserts self and following p's into <section>)
+- [ ] Parser callbacks (ie, encountering h2 inserts self and following p's into &lt;section&gt;)
   - [ ] render figure and figcaptions (using context callback from preceding todo)
   
   
