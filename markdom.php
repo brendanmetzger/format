@@ -43,7 +43,7 @@ class MarkDOM {
 class Lexer {
   public $text, $depth, $symbol;
   // TODO consider an atomic capture that will exit
-  static public $blocks = [
+  static public $elements = [
     'li'   => '[0-9]+\.|- ',
     'h'    => '#{1,6}',
     'Formatted'  => '`{4}',
@@ -53,13 +53,15 @@ class Lexer {
   ];
   
   static public function Block(string $line) {
-    $exp   = implode('|', array_map(function($regex) { 
+    //7.4  implode('|', array_map(fn($re):string => "({$re})", self::$elements);
+    $exp = implode('|', array_map(function($regex) { 
       return "({$regex})";
-    }, array_values(self::$blocks)));
+    }, self::$elements));
+    
     $key = preg_match("/\s*{$exp}/Ai", $line, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
     
     $match = array_pop($list) ?? [null, 0];
-    $type  = array_keys(self::$blocks)[$key];
+    $type  = array_keys(self::$elements)[$key];
     return new $type(new self($type, $line, ...$match));
   }
 
@@ -76,7 +78,7 @@ class Inline {
   private $block;
   //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
   private static $symbols = null;
-  public $types = [
+  public $elements = [
     'Anchor' => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
     'Strong' => '[_*]{2}',
     'Italic' => '[_*]',
@@ -91,7 +93,8 @@ class Inline {
   public function __construct(Block $block) {
     $this->block = $block;
     // php 7.4 allows self::$symbols ??= preg_replace(...)
-    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', array_values($this->types)), 3));
+
+    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', $this->elements), 3));
   }
   
   public function inject($elem) {
@@ -102,7 +105,7 @@ class Inline {
   
   public function parse($text) {
     
-    foreach ($this->types as $name => $re) {
+    foreach ($this->elements as $name => $re) {
       // print_r($re);
       // while(preg_match("/{$re}/u", $text, $match, PREG_OFFSET_CAPTURE)) {
       //   // continue/break or reset loop after replacing text
