@@ -175,7 +175,7 @@ class li extends Block {
   }
   
   // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
-  public function render(Block $previous = null): Block {
+  public function render($previous = null): Block {
     $this->reset = $previous->reset;
     $depth       = $this->lexer->depth;
 
