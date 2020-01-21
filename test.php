@@ -33,7 +33,7 @@ include('vendor-markdown.php');
 
 
 include('markdom.php');
-echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n".(new MarkDOM)->load($test);
+echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM($test);
 
 
 ?>
