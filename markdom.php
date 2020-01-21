@@ -19,7 +19,7 @@ class MarkDOM {
   private function parse(string $text) {
     // replace pilcrows and various line breaks with \n, replace tabs with spaces
     $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text); 
-    return array_map('Lexer::Block', array_filter(explode("\n", $filtered), 'MarkDOM::notEmpty'));
+    return array_map('Block::Lexer', array_filter(explode("\n", $filtered), 'MarkDOM::notEmpty'));
   }
   
   public function notEmpty($string) {
@@ -32,19 +32,19 @@ class MarkDOM {
 }
 
 /****       ****************************************************************************** LEXER */
-class Lexer {
-  public $text, $depth, $symbol;
+class Block {
+  public $name, $text, $depth, $symbol;
   // TODO consider an atomic capture that will exit
   static public $elements = [
-    'li'   => '[0-9]+\.|- ',
-    'h'    => '#{1,6}',
-    'Formatted'  => '`{4}',
-    'BlockQuote' => '>',
-    'Rule'       => '-{3,}',
-    'Block'      => '[a-z]',
+    'li'         => '[0-9]+\.|- ',
+    'h'          => '#{1,6}',
+    'pre'        => '`{4}',
+    'blockquote' => '>',
+    'hr'         => '-{3,}',
+    'p'          => '[a-z]',
   ];
-  
-  static public function Block(string $line) {
+
+  static public function Lexer(string $line) {
     //7.4  implode('|', array_map(fn($re):string => "({$re})", self::$elements);
     $exp = implode('|', array_map(function($regex) { 
       return "({$regex})";
@@ -53,14 +53,16 @@ class Lexer {
     $key = preg_match("/\s*{$exp}/Ai", $line, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
     
     $match = array_pop($list) ?? [null, 0];
-    $type  = array_keys(self::$elements)[$key];
+    $type = array_keys(self::$elements)[$key];
     return new $type(new self($type, $line, ...$match));
   }
 
-  public function __construct(string $type, string $line, string $symbol, int $indent) {
-    $this->symbol = $symbol;
-    $this->text   = substr($line, $indent);
+  public function __construct(string $name, string $line, string $symbol, int $indent) {
+    $offset = strlen($symbol);
+    $this->name   = $name != 'h' ?  $name :  "h" . $offset;
+    $this->text   = trim(substr($line, $indent + (($name == 'p') ? 0 : $offset)));
     $this->depth  = floor($indent/2);
+    $this->symbol = $symbol;
   } 
 }
 
@@ -82,16 +84,15 @@ class Inline {
     'Abbrev' => '\^{2}',
   ];
   // add sup/sub
-  public function __construct(Block $block) {
+  public function __construct($block) {
     $this->block = $block;
     // php 7.4 allows self::$symbols ??= preg_replace(...)
-
     self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', $this->elements), 3));
   }
   
   public function inject($elem) {
     $fragment = $elem->ownerDocument->createDocumentFragment();
-    $fragment->appendXML($this->parse($this->block->getValue()));
+    $fragment->appendXML($this->parse($this->block->lexer->text));
     return $elem->appendChild($fragment);
   }
   
@@ -114,53 +115,35 @@ class Inline {
 }
 
 /****       ****************************************************************************** BLOCK */
-class Block {
+class p {
   public $value, $lexer, $reset = false, $context = null;
-  protected $name = 'p', $type = null;
     
   public function __construct($lexer) {
     $this->lexer = $lexer;
     $this->value  = new Inline($this);
   }
-  
-  public function render($previous = null): Block {
+
+  public function render($previous = null) {
 
     if ($previous->context === null) 
       $this->context =  $previous;
-    else if ($this->getName() != $previous->getName() && $previous->reset)
+    else if ($this->lexer->name != $previous->lexer->name && $previous->reset)
       $this->context = $previous->reset;
     else 
       $this->context = $previous->context;
 
-    $this->value->inject($this->context->appendChild(new \DOMElement($this->getName())));
+    $this->value->inject($this->context->appendChild(new \DOMElement($this->lexer->name)));
     return $this;
-  }
-  
-  public function getName() {
-    return $this->name;
-  }
-  
-  public function getValue() {
-    return $this->lexer->text;
-  }
-  
-  public function getType() {
-    return $this->type;
   }
 }
 
 /****          ******************************************************************************* li */
-class li extends Block {
-  /*
-    TODO see note at the render method. consider a Tree object, or some way to move up/down syntactically
-  */
+class li extends p {
+
   const UP   = 1;
   const DOWN = -1;
-  protected $name = 'li';
-  public function getValue() {
-    return trim(substr($this->lexer->text, strlen($this->lexer->symbol)));
-  }
-  
+  protected $type = null;
+ 
   public function getType() {
     if (! $this->type) $this->type = $this->lexer->symbol == '- ' ? 'ul' :'ol';
     return $this->type;
@@ -170,18 +153,11 @@ class li extends Block {
     return $context->appendChild(new \DOMElement($this->getType()));
   }
   
-  public function climb(int $distance) {
-    echo "---- climb {$distance} ----- \n";
-  }
-  
   // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
-  public function render($previous = null): Block {
+  public function render($previous = null) {
     $this->reset = $previous->reset;
     $depth       = $this->lexer->depth;
-
-    // $this->climb($this->lexer->depth - $previous->lexer->depth);
-    
-    if ($previous->getName() != 'li') {
+    if ($previous->lexer->name != 'li') {
       $this->context = $this->makeParent($previous->context);
       $this->reset = $previous->context;    
     } else if ($previous->lexer->depth < $depth) { 
@@ -207,29 +183,10 @@ class li extends Block {
 }
 
 /****         ******************************************************************************** H */
-class h extends Block {
-  public function getName() {
-    if ($this->name[0] != 'h') {
-      $this->name = "h" . strlen($this->lexer->symbol);
-    }
-    return $this->name;
-  }
-  
-  public function getValue() {
-    return trim(substr($this->lexer->text, strlen($this->lexer->symbol)));
-  }
-}
-
-class BlockQuote extends Block {
-  protected $name = 'blockquote';
-  
-}
-class Formatted extends Block {
-  protected $name = 'pre';
-}
-class Rule extends Block {
-  protected $name = 'hr';
-}
+class h extends p { }
+class blockquote extends p { }
+class pre extends p { }
+class hr extends p { }
 
 
   /* notes:
