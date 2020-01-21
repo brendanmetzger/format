@@ -2,30 +2,18 @@
 
 // NEXT: parse links
 
-class XML {
-  public static function instance() {
-    static $doc = null;
-    
-    if ($doc === null) {
-      $doc = new \DOMDocument;
-      $doc->formatOutput = true;
-      $doc->loadXML('<'.MarkDOM::$root.'/>');
-                  //sprintf('<%s/>', Format::$root);
-    }
-    return $doc;
-  }
-}
-
-/****        ************************************************************************** Format */
+/****        ************************************************************************** MarkDom */
 class MarkDOM {
-  public static $root = 'article';
-
-  public function load($text) {
-    $prior = null;
+  private $doc = null;
+  
+  public function __construct($text, $root = 'article') {
+    $this->doc = new \DOMDocument;
+    $this->doc->formatOutput = true;
+    $this->doc->loadXML("<{$root}/>");
+    $prior = $this->doc->documentElement;
     foreach ($this->parse($text) as $block) {
       $prior = $block->render($prior);
     }
-    return XML::instance()->saveXML();
   }
   
   private function parse(string $text) {
@@ -36,6 +24,10 @@ class MarkDOM {
   
   public function notEmpty($string) {
     return ! empty(trim($string));
+  }
+  
+  public function __toSTring() {
+    return $this->doc->saveXML();
   }
 }
 
@@ -52,12 +44,6 @@ class Block {
     'p'          => '[a-z]',
   ];
 
-  private $relationships = [
-    'ol' => 'li',
-    'ul' => 'li',
-    'dl' => ['dd', 'dt'],
-    'blockquote' => 'p',
-  ];
   
   static public function Lexer(string $line) {
     //7.4  implode('|', array_map(fn($re):string => "({$re})", self::$elements);
@@ -140,8 +126,8 @@ class p {
   
   public function render($previous = null) {
 
-    if ($previous === null) 
-      $this->context =  XML::instance()->documentElement;
+    if ($previous->context === null) 
+      $this->context =  $previous;
     else if ($this->lexer->name != $previous->lexer->name && $previous->reset)
       $this->context = $previous->reset;
     else 
