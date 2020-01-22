@@ -139,9 +139,6 @@ class p {
 
 /****          ******************************************************************************* li */
 class li extends p {
-
-  const UP   = 1;
-  const DOWN = -1;
   protected $type = null;
  
   public function getType() {
