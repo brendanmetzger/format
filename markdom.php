@@ -1,6 +1,27 @@
 <?php
 
-// NEXT: parse links
+define('BLOCK', [
+  'li'         => '[0-9]+\.|- ',
+  'h'          => '#{1,6}',
+  'pre'        => '`{4}',
+  'blockquote' => '>',
+  'hr'         => '-{3,}',
+  'p'          => '[a-z]',
+]);
+
+define('INLINE', [
+  'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
+  'strong' => '[_*]{2}',
+  'em'     => '[_*]',
+  'mark'   => '=',
+  'q'      => '"',
+  'code'   => '`',
+  'samp'   => '`{2}',
+  's'      => '~{2}',
+  'abbr'   => '\^{2}',
+  'time'   => '\+',
+  'input'  => '\[[ox]\]'
+]);
 
 /****         ************************************************************************** MarkDom */
 class MarkDOM {
@@ -17,7 +38,6 @@ class MarkDOM {
   }
   
   private function split(string $text) {
-    // replace pilcrows and various line breaks with \n, replace tabs with spaces
     $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text); 
     return array_map('Block::Lexer', array_filter(explode("\n", $filtered), 'MarkDOM::notEmpty'));
   }
@@ -33,27 +53,18 @@ class MarkDOM {
 
 /****       ****************************************************************************** LEXER */
 class Block {
-  public $name, $text, $depth, $symbol;
-  static public $tags = [
-    'li'         => '[0-9]+\.|- ',
-    'h'          => '#{1,6}',
-    'pre'        => '`{4}',
-    'blockquote' => '>',
-    'hr'         => '-{3,}',
-    'p'          => '[a-z]',
-  ];
-
-  static public function Lexer(string $text) {
-    //7.4  implode('|', array_map(fn($re):string => "({$re})", self::$tags);
+  public $name, $text, $depth, $symbol, $value, $reset = false, $context = null;
+  
+  static public function Lexer(string $text) { 
+    //7.4  implode('|', array_map(fn($re):string => "({$re})", BLOCK);
     $exp = implode('|', array_map(function($regex) { 
       return "({$regex})";
-    }, self::$tags));
+    }, BLOCK));
     
-    $key = preg_match("/\s*{$exp}/Ai", $text, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
-    
+    $key   = preg_match("/\s*{$exp}/Ai", $text, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
     $match = array_pop($list) ?? [null, 0];
-    $type = array_keys(self::$tags)[$key];
-    return new $type(new self($type, $text, ...$match));
+
+    return new self(array_keys(BLOCK)[$key], $text, ...$match);
   }
 
   public function __construct(string $name, string $text, string $symbol, int $indent) {
@@ -61,39 +72,78 @@ class Block {
     $this->name   = $name != 'h' ?  $name :  "h" . $offset;
     $this->text   = trim(substr($text, $indent + (($name == 'p') ? 0 : $offset)));
     $this->depth  = floor($indent/2);
-    $this->symbol = $symbol;
-  } 
-}
+    $this->symbol = trim($symbol);
+    $this->value  = new Inline($this);
+  }
+  
+  public function render($previous) {
+    if ($this->name == 'li')
+      return $this->renderLI($previous);
+    else if ($previous instanceof DOMElement) 
+      $this->context =  $previous;
+    else if ($this->name != $previous->name && $previous->reset)
+      $this->context = $previous->reset;
+    else 
+      $this->context = $previous->context;
 
+    $this->value->inject($this->context->appendChild(new \DOMElement($this->name)));
+    
+    return $this;
+  }
+  
+  public function getType() {
+    return $this->symbol == '-' ? 'ul' :'ol';
+  }
+  
+  public function makeParent(\DOMElement $context): \DOMElement {
+    return $context->appendChild(new \DOMElement($this->getType()));
+  }
+  
+  // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
+  // TODO: nested lists should get a flag that can be styled (otherwise they will be doubled bulleted)
+  public function renderLI($previous) {
+    $this->reset = $previous->reset;
+    $depth       = $this->depth;
+    if ($previous->name != 'li') {
+      $this->context = $this->makeParent($previous->context);
+      $this->reset = $previous->context;    
+    } else if ($previous->depth < $depth) { 
+      $this->context = $this->makeParent($previous->context->appendChild(new \DOMElement('li')));
+    } elseif ($previous->depth > $depth) {
+      $this->context = $previous->context;
+      while($depth++ < $previous->depth) {
+        $this->context = $this->context->parentNode->parentNode;
+      }
+      if ($this->getType() != $this->context->nodeName) {
+        // will break if indentation is sloppy
+        $this->context = $this->makeParent($this->context->parentNode);  
+      }
+    } elseif ($this->getType() != $previous->getType()) {
+      $this->context = $this->makeParent($previous->context->parentNode);
+    } else {
+      $this->context = $previous->context;
+    }
+    
+    $this->value->inject($this->context->appendChild(new \DOMElement('li')));
+    return $this;
+  }
+}
 
 /****        **************************************************************************** INLINE */
 class Inline {
   private $block;
   //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
   private static $symbols = null;
-  public $tags = [
-    'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
-    'strong' => '[_*]{2}',
-    'em'     => '[_*]',
-    'mark'   => '=',
-    'q'      => '"',
-    'code'   => '`',
-    'samp'   => '`{2}',
-    's'      => '~{2}',
-    'abbr'   => '\^{2}',
-    'time'   => '\+',
-    'input'  => '\[[ox]\]'
-  ];
   // add sup/sub, time
   public function __construct($block) {
     $this->block = $block;
-    //7.4 self::$symbols ??= preg_replace("/[\d{}+?:]/", '', count_chars(implode('', $this->tags), 3));
-    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', $this->tags), 3));
+    //7.4 self::$symbols ??= preg_replace("/[\d{}+?:]/", '', count_chars(implode('', INLINE), 3));
+    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', INLINE), 3));
   }
   
   public function inject($elem) {
     $fragment = $elem->ownerDocument->createDocumentFragment();
-    $fragment->appendXML($this->parse($this->block->lexer->text));
+    $fragment->appendXML($this->parse($this->block->text));
     return $elem->appendChild($fragment);
   }
   
@@ -114,80 +164,3 @@ class Inline {
     return $text;
   }
 }
-
-/****       ****************************************************************************** BLOCK */
-class p {
-  public $value, $lexer, $reset = false, $context = null;
-    
-  public function __construct($lexer) {
-    $this->lexer = $lexer;
-    $this->value  = new Inline($this);
-  }
-
-  public function render($previous) {
-    if ($previous instanceof DOMElement) 
-      $this->context =  $previous;
-    else if ($this->lexer->name != $previous->lexer->name && $previous->reset)
-      $this->context = $previous->reset;
-    else 
-      $this->context = $previous->context;
-
-    $this->value->inject($this->context->appendChild(new \DOMElement($this->lexer->name)));
-    return $this;
-  }
-}
-
-/****          ******************************************************************************* li */
-class li extends p {
-  protected $type = null;
- 
-  public function getType() {
-    if (! $this->type) $this->type = $this->lexer->symbol == '- ' ? 'ul' :'ol';
-    return $this->type;
-  }
-  
-  public function makeParent(\DOMElement $context): \DOMElement {
-    return $context->appendChild(new \DOMElement($this->getType()));
-  }
-  
-  // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
-  public function render($previous) {
-    $this->reset = $previous->reset;
-    $depth       = $this->lexer->depth;
-    if ($previous->lexer->name != 'li') {
-      $this->context = $this->makeParent($previous->context);
-      $this->reset = $previous->context;    
-    } else if ($previous->lexer->depth < $depth) { 
-      $this->context = $this->makeParent($previous->context->appendChild(new \DOMElement('li')));
-    } elseif ($previous->lexer->depth > $depth) {
-      $this->context = $previous->context;
-      while($depth++ < $previous->lexer->depth) {
-        $this->context = $this->context->parentNode->parentNode;
-      }
-      if ($this->getType() != $this->context->nodeName) {
-        // will break if indentation is sloppy
-        $this->context = $this->makeParent($this->context->parentNode);  
-      }
-    } elseif ($this->getType() != $previous->getType()) {
-      $this->context = $this->makeParent($previous->context->parentNode);
-    } else {
-      $this->context = $previous->context;
-    }
-    
-    $this->value->inject($this->context->appendChild(new \DOMElement('li')));
-    return $this;
-  }
-}
-
-/****         ******************************************************************************** H */
-class h extends p { }
-class blockquote extends p { }
-class pre extends p { }
-class hr extends p { }
-
-
-  /* notes:
-  
-  rather than bloat the code with complicated syntax to make things like figure and figcaption, consider contextual callbacks, ie., something like an <hr> followed by a <img> followed by a <p>text</p> would create a <figure><img/><figcaption>text</figcaption></figure>. This would be done using xpath + callbacks, ie addCallback('//hr/following-sibling::img/following-sibling::p, function($doc))
-  
-  */

@@ -29,3 +29,7 @@ Well-formatted html can be precisely targeted with CSS without necessity of clas
   
 #### Under Consideration
 - [ ] Checkboxes and perhaps other inputs (select menus, input ranges... things that are useful for interactivity)
+
+## Notes
+
+  rather than bloat the code with complicated syntax to make things like figure and figcaption, consider contextual callbacks, ie., something like an <hr> followed by a <img> followed by a <p>text</p> would create a <figure><img/><figcaption>text</figcaption></figure>. This would be done using xpath + callbacks, ie addCallback('//hr/following-sibling::img/following-sibling::p, function($doc))
