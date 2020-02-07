@@ -1,166 +1,225 @@
 <?php
-
-define('BLOCK', [
-  'li'         => '[0-9]+\.|- ',
-  'h'          => '#{1,6}',
-  'pre'        => '`{4}',
-  'blockquote' => '>',
-  'hr'         => '-{3,}',
-  'p'          => '[a-z]',
-]);
-
-define('INLINE', [
-  'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
-  'strong' => '[_*]{2}',
-  'em'     => '[_*]',
-  'mark'   => '=',
-  'q'      => '"',
-  'code'   => '`',
-  'samp'   => '`{2}',
-  's'      => '~{2}',
-  'abbr'   => '\^{2}',
-  'time'   => '\+',
-  'input'  => '\[[ox]\]'
-]);
+/*
+  TODO
+  [ ] TYPOGRAPHY: replace ' with actual apostrophe, -- with n-dash --- with mdash
+  [ ] deal with & breaking everything
+  [ ] post-render h2's into sections
+  [ ] think of syntax to post-render certain lists into definition lists
+  [ ] consider |mark| into post-render <strong><strong>mark</strong></strong> (****mark****) thing
+  [ ] deal with abstract HTML class (by removing it and placing code elsewhere)
+*/
 
 /****         ************************************************************************** MarkDom */
 class MarkDOM {
-  private $doc = null;
-  
-  public function __construct($text, $root = 'article') {
-    $this->doc = new \DOMDocument;
-    $this->doc->formatOutput = true;
-    $this->doc->loadXML("<{$root}/>");
-    $prior = $this->doc->documentElement;
-    foreach ($this->split($text) as $block) {
-      $prior = $block->render($prior);
+  public function __construct($path, $root = 'article') {
+    $this->doc = new DOMDocument('1.0', 'UTF-8');
+    echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n RUNNING AGAIN \n\n\n\n";
+    foreach ($this->scan($path, $this->doc) as $block) {
+      $rendered = $block->render();
+      print_r($rendered);
     }
   }
   
-  private function split(string $text) {
-    $filtered = preg_replace(['/¶|\r\n|\r/u', '/\t/'], ["\n",'    '], $text); 
-    return array_map('Block::Lexer', array_filter(explode("\n", $filtered), 'MarkDOM::notEmpty'));
+  private function scan($path, DOMDocument $context) {    
+    try {
+      $handle = fopen($path, 'r');
+      $block = new Block($context);
+
+      while ($line = fgets($handle)) {
+        $block->capture($line);
+        if (! $block->state(2)) continue;
+        yield $block;
+        $block = new Block($context);
+      }
+    } finally {
+      fclose($handle);
+    }
+
   }
-  
-  public function notEmpty($string) {
-    return ! empty(trim($string));
-  }
-  
+
+
   public function __toSTring() {
     return $this->doc->saveXML();
   }
 }
 
-/****       ****************************************************************************** LEXER */
-class Block {
-  public $name, $text, $depth, $symbol, $value, $reset = false, $context = null;
+class Tokenizer {
+  const BLOCK = [
+    'keys' => [ 'ol'   , 'ul' ,    'h'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
+    'rgxp' => ['\d+\.' , '- ' , '#{1,6}', '`{3}' ,     '>'     , '-{3,}',  '\/\/'  , '\S'  ],
+    'exit' => [ false  , false,  false  ,  true  ,    false    ,  false ,  false   , false ],
+    'node' => [ 'li'   , 'li' ,   '*'   ,  false ,     'p'     ,  null  ,  false   ,  '*'  ],
+  ];
   
-  static public function Lexer(string $text) { 
-    //7.4  implode('|', array_map(fn($re):string => "({$re})", BLOCK);
-    $exp = implode('|', array_map(function($regex) { 
-      return "({$regex})";
-    }, BLOCK));
+  // these are really better suited to a concept of 'fences', and pre would be involved in one. lots of pondering still
+  const INLINE = [
+    'q'      => '"([^"]+)"',
+    'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
+    'input'  => '^\[([x\s])\](.*)$',
+    // TODO, right now this does img too.. would rather something <whatever.jpg> do the trick, as a general embedder
+    'strong' => '\*\*([^*]+)\*\*',
+    'em'     => '\*([^\*]+)\*',
+    'mark'   => '\|([^|]+)\|',
+    'time'   => '``([^``]+)``',
+    'code'   => '`([^`]+)`',
+    's'      => '~~([^~~]+)~~',
+    'abbr'   => '\^\^([^\^]+)\^\^',
+  ];
+  
+  static public function blockmatch($text) {
+    //7.4   sprintf("/%s/Ai",implode('|', array_map(fn($re) => "({$re})", self::BLOCK['rgxp']));
+    $rgxp = sprintf("/%s/Ai", implode('|', array_map(function($regex) { 
+      return "\s*({$regex})";
+    }, self::BLOCK['rgxp'])));
     
-    $key   = preg_match("/\s*{$exp}/Ai", $text, $list, PREG_OFFSET_CAPTURE) ? count($list) - 2 : 0;
-    $match = array_pop($list) ?? [null, 0];
+    if (preg_match($rgxp, $text, $list, PREG_OFFSET_CAPTURE) < 1) return false;
 
-    return new self(array_keys(BLOCK)[$key], $text, ...$match);
-  }
-
-  public function __construct(string $name, string $text, string $symbol, int $indent) {
-    $offset = strlen($symbol);
-    $this->name   = $name != 'h' ?  $name :  "h" . $offset;
-    $this->text   = trim(substr($text, $indent + (($name == 'p') ? 0 : $offset)));
-    $this->depth  = floor($indent/2);
-    $this->symbol = trim($symbol);
-    $this->value  = new Inline($this);
-  }
-  
-  public function render($previous) {
-    if ($this->name == 'li')
-      return $this->renderLI($previous);
-    else if ($previous instanceof DOMElement) 
-      $this->context =  $previous;
-    else if ($this->name != $previous->name && $previous->reset)
-      $this->context = $previous->reset;
-    else 
-      $this->context = $previous->context;
-
-    $this->value->inject($this->context->appendChild(new \DOMElement($this->name)));
-    
-    return $this;
-  }
-  
-  public function getType() {
-    return $this->symbol == '-' ? 'ul' :'ol';
-  }
-  
-  public function makeParent(\DOMElement $context): \DOMElement {
-    return $context->appendChild(new \DOMElement($this->getType()));
-  }
-  
-  // TODO: there has to be recursion somewhere in here. This hurts the eyeballs right now
-  // TODO: nested lists should get a flag that can be styled (otherwise they will be doubled bulleted)
-  public function renderLI($previous) {
-    $this->reset = $previous->reset;
-    $depth       = $this->depth;
-    if ($previous->name != 'li') {
-      $this->context = $this->makeParent($previous->context);
-      $this->reset = $previous->context;    
-    } else if ($previous->depth < $depth) { 
-      $this->context = $this->makeParent($previous->context->appendChild(new \DOMElement('li')));
-    } elseif ($previous->depth > $depth) {
-      $this->context = $previous->context;
-      while($depth++ < $previous->depth) {
-        $this->context = $this->context->parentNode->parentNode;
-      }
-      if ($this->getType() != $this->context->nodeName) {
-        // will break if indentation is sloppy
-        $this->context = $this->makeParent($this->context->parentNode);  
-      }
-    } elseif ($this->getType() != $previous->getType()) {
-      $this->context = $this->makeParent($previous->context->parentNode);
-    } else {
-      $this->context = $previous->context;
-    }
-    
-    $this->value->inject($this->context->appendChild(new \DOMElement('li')));
-    return $this;
+    $match = array_pop($list); // last match contains match & offset: [string $symbol, int offset]
+    $index = count($list)-1;
+    return [
+      'key'    => self::BLOCK['keys'][$index],
+      'exit'   => self::BLOCK['exit'][$index],
+      'symbol' => $match[0],
+      'depth'  => floor($match[1] / 2),
+    ];
   }
 }
 
-/****        **************************************************************************** INLINE */
-class Inline {
-  private $block;
-  //(?:(\_+|\^|~{2}|`+|=)([^*^~`=]+)\1)
-  private static $symbols = null;
-  // add sup/sub, time
-  public function __construct($block) {
-    $this->block = $block;
-    //7.4 self::$symbols ??= preg_replace("/[\d{}+?:]/", '', count_chars(implode('', INLINE), 3));
-    self::$symbols = self::$symbols ?? preg_replace("/[\d{}+?:]/", '', count_chars(implode('', INLINE), 3));
+/****       ****************************************************************************** LEXER */
+class Block {
+  // $status is 0 for ready, 1 for parsing and 2 for exit
+  public $doc, $context = null;
+
+  private $status = 0, $lines = [], $parsed = [], $exit = '';
+  
+  
+  public function __construct(DOMDocument $doc) {
+    // $this->doc = $doc;
   }
   
+  public function state(int $status): bool {
+    return $status === $this->status;
+  }
+  
+  // STILL HAVING ISSUES CAPTURING AROUND NEWLINES
+  public function capture(string $text) {
+    if ($this->status === 0) {
+      if ($match = Tokenizer::blockmatch($text)) {
+        $this->parsed[] = $match;
+        $this->status  += 1;
+        // check for if the capture exits on a condition (fenced)
+        if ($match['exit']) {
+          $this->exit = $match['symbol'];
+          return;
+        }
+      } else return;
+      
+    } else if (!empty($this->parsed) && rtrim($text) == $this->exit) {
+      return $this->status += 1;
+    }
+    $this->lines[] = $text;
+  }
+  
+  public function render() {
+    return $this;
+  }
+  
+}
+
+
+/****        **************************************************************************** INLINE */
+class Inline {
+  const tags = [
+    'q'      => '"([^"]+)"',
+    'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
+    'input'  => '^\[([x\s])\](.*)$',
+    // TODO, right now this does img too.. would rather something <whatever.jpg> do the trick, as a general embedder
+    'strong' => '\*\*([^*]+)\*\*',
+    'em'     => '\*([^\*]+)\*',
+    'mark'   => '\|([^|]+)\|',
+    'time'   => '``([^``]+)``',
+    'code'   => '`([^`]+)`',
+    's'      => '~~([^~~]+)~~',
+    'abbr'   => '\^\^([^\^]+)\^\^',
+  ];
+    
+  private $text, $node;
+  
+  public function __construct($text, DOMDocument $doc) {
+    $this->node = $doc->createDocumentFragment();
+    $this->frag = $doc->createDocumentFragment();
+    $this->frag->textContent = $text;
+    $this->doc  = $doc;
+    $this->text = $text;
+  }
+  
+  public function getFlags() {
+    count_chars(implode('', INLINE::tags), 3);
+  }
+    
   public function inject($elem) {
-    $fragment = $elem->ownerDocument->createDocumentFragment();
-    $fragment->appendXML($this->parse($this->block->text));
-    return $elem->appendChild($fragment);
+    if (empty($this->text)) return;
+    $this->node->appendXML($this->parse($this->text));
+    return $elem->appendChild($this->node);
+  }
+  
+  public function parse2($elem) {
+    // this is part of a rewrite of the inline parser so it can easily be used on its own, outside of the Markdom
+    // instance (like in model output). I want to get something in place that replaceChilds text nodes with proper
+    // element nodes, so the constant saving and outputing and injecting/appending of xml isn't done unnecessarily
+    foreach (INLINE::tags as $name => $re) {
+      
+      preg_match_all("/{$re}/u", $this->frag->textContent, $hits, PREG_OFFSET_CAPTURE);
+      foreach (array_reverse($hits[0]) as [$k, $i]) {
+        // $N = $var->firstChild->splitText(mb_strlen(substr($var, 0, $i), 'UTF-8'))
+        //                      ->splitText(strlen($k))->previousSibling;
+        //     if (substr( $N( substr($N,1) ),0,1 ) != '$') $out[] = [$N, explode(':', str_replace('|', '/', $N))];
+      }
+      print_r($hits);
+    }
   }
   
   public function parse($text) {
-    
-    foreach ($this->tags as $name => $re) {
-      // print_r($re);
-      // while(preg_match("/{$re}/u", $text, $match, PREG_OFFSET_CAPTURE)) {
-      //   // continue/break or reset loop after replacing text
-      //
-      // }
-    }
-    
-    while(preg_match('/(?:(!?)\[([^\)^\[]+)\]\(([^\)]+)\)(?:\"([^"]+)\")?)|(?:([_*^]{1,2})(.+)(\1))/u', $text, $match, PREG_OFFSET_CAPTURE)) {
-      $text = substr_replace($text, '-'.$match[2][0].'-', $match[0][1], strlen($match[0][0]));
-      // print_r($match);
+    foreach (INLINE::tags as $name => $re) {
+      if (preg_match_all("/{$re}/u", $text, $hits, PREG_SET_ORDER) > 0)
+        foreach ($hits as $hit) $text = str_replace($hit[0], self::{$name}($this->doc, ...$hit), $text);
     }
     return $text;
+  }
+  
+  static public function a($doc, $line, $flag, $value, $url, $title = '') {
+    [$name, $attr] = $flag ? ['img', 'src'] : ['a', 'href'];
+    $elem = $doc->createElement($name, $value);
+    $elem->setAttribute($attr, $url);
+    if ($title) $elem->setAttribute('title', $title);
+    return $doc->saveXML($elem);
+  }
+
+  
+  static public function time($doc, $line, $value) {
+    $time = strtotime($value);
+    $elem = $doc->createElement('time', date('l F jS', $time));
+    $elem->setAttribute('datetime', date(DATE_W3C, $time));
+    return $doc->saveXML($elem);
+  }
+  
+  static public function input($doc, $line, $value, $label) {
+    $elem = $doc->createElement('label', $label);
+    $input = $elem->insertBefore($doc->createElement('input'), $elem->firstChild);
+    $input->setAttribute('type', 'checkbox');
+    if ($value != ' ') {
+      $input->setAttribute('checked', 'checked');
+    }
+    
+    return $doc->saveXML($elem);
+  }
+  
+  static public function __callStatic($name, $args) {
+    [$doc, $line, $value] = $args;
+    $elem = $doc->createElement($name);
+    $frag = $doc->createDocumentFragment();
+    $frag->appendXML($value);
+    $elem->appendChild($frag);
+    return $doc->saveXML($elem);
   }
 }
