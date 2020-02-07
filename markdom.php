@@ -14,29 +14,11 @@ class MarkDOM {
   public function __construct($path, $root = 'article') {
     $this->doc = new DOMDocument('1.0', 'UTF-8');
     echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n RUNNING AGAIN \n\n\n\n";
-    foreach ($this->scan($path, $this->doc) as $block) {
+    foreach (Tokenizer::scan($path, $this->doc) as $block) {
       $rendered = $block->render();
       print_r($rendered);
     }
   }
-  
-  private function scan($path, DOMDocument $context) {    
-    try {
-      $handle = fopen($path, 'r');
-      $block = new Block($context);
-
-      while ($line = fgets($handle)) {
-        $block->capture($line);
-        if (! $block->state(2)) continue;
-        yield $block;
-        $block = new Block($context);
-      }
-    } finally {
-      fclose($handle);
-    }
-
-  }
-
 
   public function __toSTring() {
     return $this->doc->saveXML();
@@ -83,14 +65,31 @@ class Tokenizer {
       'depth'  => floor($match[1] / 2),
     ];
   }
+  
+  static public function scan($path, DOMDocument $context) {    
+    try {
+      $handle = fopen($path, 'r');
+      $block = new Block($context);
+
+      while ($line = fgets($handle)) {
+        $block->capture($line);
+        if (! $block->state(2)) continue;
+        yield $block;
+        $block = new Block($context);
+      }
+    } finally {
+      fclose($handle);
+    }
+  }
 }
 
 /****       ****************************************************************************** LEXER */
 class Block {
-  // $status is 0 for ready, 1 for parsing and 2 for exit
+  
   public $doc, $context = null;
-
+  // Status:  0=ready, 1=parsing and 2=finish
   private $status = 0, $lines = [], $parsed = [], $exit = '';
+  
   
   
   public function __construct(DOMDocument $doc) {
@@ -101,7 +100,6 @@ class Block {
     return $status === $this->status;
   }
   
-  // STILL HAVING ISSUES CAPTURING AROUND NEWLINES
   public function capture(string $text) {
     if ($this->status === 0) {
       if ($match = Tokenizer::blockmatch($text)) {
@@ -129,20 +127,7 @@ class Block {
 
 /****        **************************************************************************** INLINE */
 class Inline {
-  const tags = [
-    'q'      => '"([^"]+)"',
-    'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
-    'input'  => '^\[([x\s])\](.*)$',
-    // TODO, right now this does img too.. would rather something <whatever.jpg> do the trick, as a general embedder
-    'strong' => '\*\*([^*]+)\*\*',
-    'em'     => '\*([^\*]+)\*',
-    'mark'   => '\|([^|]+)\|',
-    'time'   => '``([^``]+)``',
-    'code'   => '`([^`]+)`',
-    's'      => '~~([^~~]+)~~',
-    'abbr'   => '\^\^([^\^]+)\^\^',
-  ];
-    
+
   private $text, $node;
   
   public function __construct($text, DOMDocument $doc) {
