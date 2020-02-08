@@ -126,38 +126,39 @@ class Block {
     $context = $this->doc->documentElement;
 
     foreach($this->process($this->munch) as $element) {
-      $context->appendChild($element);
+      print_r($element);
+      // $context->appendChild($element);
     }
     return $this;
   }
   
   private function evaluate($lexeme, $munch) {
 
-    if (empty($munch)) {
-      return;
-      // return $munch->appendData($lexeme);
-      
-    }
+    if (!$munch) return;
     
     if ($munch['join'] && $munch['tots'] === 'CDATA') {
-      return $this->doc->createCDATASection($lexeme);
+      // return $this->doc->createCDATASection($lexeme);
+      return "create CDATA Section {$lexeme}\n";
     }
     
     if ($munch['name'] === 'comment') {
-      return $this->doc->createComment($lexeme);
+      // return $this->doc->createComment($lexeme);
+      return "create COMMENT {$lexeme}\n";
     }
     
     // now we do shitloads of work with type/depth 
-    return $this->doc->createElement($munch['name']);
+    // return $this->doc->createElement($munch['name']);
+    return "create ELEMENT type {$munch['name']} and process text: {$lexeme} \n";
     
     // $gen->send();
   }
   
   private function process($munch) {
     foreach($this->lexeme as $lexeme) { 
-      $node = $this->evaluate($lexeme, $munch || Tokenizer::blockmatch($lexeme));
-      yield $node;
-      $munch = $node instanceof DOMCharacterData ? $node : false;
+
+      yield $this->evaluate($lexeme, $munch ?? Tokenizer::blockmatch($lexeme));
+
+      $munch = isset($munch['join']) && $munch['join'] ? $munch : false;
     }
   }
   
