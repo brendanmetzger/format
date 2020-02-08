@@ -13,10 +13,10 @@
 class MarkDOM {
   public function __construct($path, $root = 'article') {
     $this->doc = new DOMDocument('1.0', 'UTF-8');
+    $this->doc->formatOutput = true;
     $this->doc->loadXML("<{$root}/>");
     foreach (Tokenizer::scan($path, $this->doc) as $block) {
-      $rendered = $block->render();
-      // print_r($rendered);
+      $rendered = $block->process();
     }
   }
 
@@ -28,12 +28,14 @@ class MarkDOM {
 class Tokenizer {
   const BLOCK = [
   //'rgxp' => '/\s*(?:(\d+\.)|(- )|(#{1,6})|(`{3})|(>)|(-{3,})|(\/\/)|(\S))/Ai',
-    'name' => [ 'ol'   , 'ul' ,    'h'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'   ],
-    'rgxp' => ['\d+\.' , '- ' , '#{1,6}', '`{3}' ,     '>'     , '-{3,}',  '\/\/'  , '\S'   ],
-    'join' => [ false  , false,  false  ,  true  ,    false    ,  false ,  false   , false  ],
-    'tots' => [ 'li'   , 'li' , 'PCDATA', 'CDATA',     'p'     , 'EMPTY', 'CDATA'  ,'PCDATA'],
+    'name' => [ 'ol'    , 'ul' ,  'h%d'   ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6} ?', '`{3}' ,   '> ?'     , '-{3,}',  '\/\/'  , '\S'  ],
+    'join' => [ false   , false,  false   ,  true  ,    false    ,  false ,  false   , false ],
+    'type' => [ 'li'    , 'li' ,    1     ,    4   ,     'p'     ,    0   ,    8     ,   1   ],
   ];
-  
+  // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, COMMENT: 8; EMPTY: 0 (non-standard)
+
+
   // these are really better suited to a concept of 'fences', and pre would be involved in one. lots of pondering still
   const BOUND = [
     'q'      => '"([^"]+)"',        // " 
@@ -66,6 +68,7 @@ class Tokenizer {
 
     return array_merge([
       'mark'  => $match[0],
+      'trim'  => strlen($match[0]),
       'depth' => floor($match[1] / 2),
     ], $column);
   }
@@ -78,13 +81,27 @@ class Tokenizer {
     $block = new Block($context);
 
     foreach (new SplFileObject($path) as $line) {
-
       $block->capture($line);
       if ($block->state(Block::FINISHED) === false) continue;
       yield $block;
       $block = new Block($context);
     }
+    // in case a file does not end with a newline, or a file is empty;
+    yield $block;
   }
+}
+
+class Renderer {
+/*
+  Brief: This class should be where processing of HTML occurs. That means, render as a term should only imply
+  the involvement of a markup language (ie, no plaintext or 'markdown-ish' stuff which can be 'scanned/evaluated/parsed)
+  
+  1. constructs generators that returns new nodes, ie; foreach(renderer->processSections() as $section)...
+  2. find content such as comment nodes for insertion
+  3. move content, such as meta/link elements, or things from item 2
+  4. do arbitrary proccessing related to 1, such as creating footnotes, etc, figure->figcaption, rendering tables, etc
+
+*/
 }
 
 /****       ****************************************************************************** BLOCK */
@@ -121,47 +138,47 @@ class Block {
     $this->lexeme[] = $text;
   }
   
-  public function render() {
-    // START: create a generator function and load with current config ($munch);
+  public function process() {
     $context = $this->doc->documentElement;
-
-    foreach($this->process($this->munch) as $element) {
-      print_r($element);
-      // $context->appendChild($element);
+    $munch = $this->munch;
+    foreach($this->lexeme as $lexeme) { 
+      $context = $this->evaluate($context, $lexeme, $munch ?? Tokenizer::blockmatch($lexeme));
+      $munch = isset($munch['type']) && $munch['type'] === XML_CDATA_SECTION_NODE ? $munch : null;
     }
     return $this;
   }
   
-  private function evaluate($lexeme, $munch) {
+  private function evaluate($context, $lexeme, $munch) {
 
-    if (!$munch) return;
-    
-    if ($munch['join'] && $munch['tots'] === 'CDATA') {
-      // return $this->doc->createCDATASection($lexeme);
-      return "create CDATA Section {$lexeme}\n";
+    if ($context instanceof DOMCdataSection || $context instanceof DOMComment) {
+      $context->appendData($lexeme);
+    } else if ($munch['name'] === 'comment') {
+       $element = $context->appendChild($this->doc->createComment(trim($lexeme)));
+    } else if ($munch['join'] && $munch['type'] === XML_CDATA_SECTION_NODE) {
+        $element = $context->appendChild($this->doc->createElement($munch['name']));
+        return $element->appendChild($this->doc->createCDATASection($lexeme));
+
+    } else {
+      $element = $this->doc->createElement(sprintf($munch['name'], $munch['trim']));
+      if ($munch['type'] !== 0) {
+        if (is_int($munch['type'])) {
+          $element->nodeValue = substr(trim($lexeme), $munch['trim']);
+        } else {
+          // these are elements that will always be nested have elements (ul, ol, blockquote, etc).
+          // 1. remember the type, and if it changes, must create a new child and embed in a new context.
+          // if depth > last depth OR type != last type: new context
+          // if depth < last depth: parent's parent context
+          // else same context
+          $child = $element->appendChild($this->doc->createElement($munch['type']));
+          $child->nodeValue = substr(trim($lexeme), $munch['trim']);
+        }
+      }
+      $context->appendChild($element);
     }
     
-    if ($munch['name'] === 'comment') {
-      // return $this->doc->createComment($lexeme);
-      return "create COMMENT {$lexeme}\n";
-    }
     
-    // now we do shitloads of work with type/depth 
-    // return $this->doc->createElement($munch['name']);
-    return "create ELEMENT type {$munch['name']} and process text: {$lexeme} \n";
-    
-    // $gen->send();
+    return $context;
   }
-  
-  private function process($munch) {
-    foreach($this->lexeme as $lexeme) { 
-
-      yield $this->evaluate($lexeme, $munch ?? Tokenizer::blockmatch($lexeme));
-
-      $munch = isset($munch['join']) && $munch['join'] ? $munch : false;
-    }
-  }
-  
 }
 
 
