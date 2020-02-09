@@ -17,7 +17,7 @@ class MarkDOM {
     $this->doc->loadXML("<{$root}/>");
     $scanner = Tokenizer::scan(new SplFileObject($path), $this->doc);
     foreach ($scanner as $block) {
-      $rendered = $block->process();
+      $rendered = $block->process($this->doc->documentElement);
     }
   }
 
@@ -143,8 +143,8 @@ class Block {
     return ! $this->finished();
   }
   
-  public function process() {
-    $context = $this->doc->documentElement;
+  public function process(DOMElement $context) {
+    
     foreach($this->lexeme as $idx => $lexeme) { 
 
       if ($this->tokens[0]['type'] !== XML_CDATA_SECTION_NODE && !isset($this->tokens[$idx])) {
@@ -180,6 +180,7 @@ class Block {
             $child->nodeValue = substr(trim($lexeme), $token['trim']);
               
           } else if ($previous['depth'] != $token['depth']) {
+            // create new Block instead of all this razzledazzle
             echo "previous depth is {$previous['depth']} — gotta make a new type for {$token['name']} at {$token['depth']}\n";
             // if depth > last depth OR type != last type: new context
             // if depth < last depth: parent's parent context
