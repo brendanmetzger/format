@@ -27,6 +27,17 @@ class MarkDOM {
   }
 }
 
+// Consider a token class for each element
+
+class Token {
+  public function __construct($name, $rgxp, $fenced, $contents) {
+    # code...
+  }
+  
+  // this token object could delegate responsibility for creation of it's element, making
+  // the Block::evaluate method much less messy.
+}
+
 class Tokenizer {
   const BLOCK = [
   //'rgxp' => '/\s*(?:(\d+\.)|(- )|(#{1,6})|(`{3})|(>)|(-{3,})|(\/\/)|(\S))/Ai',
@@ -37,12 +48,14 @@ class Tokenizer {
   ];
   // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, COMMENT: 8; EMPTY: 0 (non-standard)
 
-
+  // consider changing ``` to ::, esp since then classes can be added nicer: ::.javascript  ::script|pre|style
+  
   // these are really better suited to a concept of 'fences', and pre would be involved in one. lots of pondering still
   const BOUND = [
     'q'      => '"([^"]+)"',        // " 
     'strong' => '\*\*([^*]+)\*\*',  // **
     'em'     => '\*([^\*]+)\*',     // *
+    'span'   => '\_([^\_]+)\_',     // _
     'mark'   => '\|([^|]+)\|',      // |
     'time'   => '``([^``]+)``',     // ``
     'code'   => '`([^`]+)`',        // `
@@ -50,7 +63,7 @@ class Tokenizer {
     'abbr'   => '\^\^([^\^]+)\^\^', // ^^
   ];
   
-  // links, inputs, img (perhaps more; sup, sub, audio video figure, table, footnotes, etc) st|nd|rd|th|[0-9.]
+  // links, inputs, img (perhaps more; sup, sub, audio video figure, table, footnotes, etc) \^(st|nd|rd|th|[\d]+)
   const HYBRID = [
     // TODO, right now this does img too.. would rather something <whatever.jpg> do the trick, as a general embedder
     'a'      => '(!?)\[([^\)^\[]+)\]\(([^\)]+)(?:\"([^"]+)\")?\)',
@@ -59,8 +72,9 @@ class Tokenizer {
   
   static public function blockmatch($text) {
     //7.4   sprintf("/%s/Ai", implode('|', array_map(fn($re) => "({$re})", self::BLOCK['rgxp']));
+    //8.0 weakMap this
     $rgxp = sprintf("/\s*(?:%s)/Ai", implode('|', array_map(function($re) { 
-      return "({$re})";
+      return "({$re})"; // add capture for css classes or attributes can be (?:\.([a-z]+)\s), so ##.help This will have a class applied or
     }, self::BLOCK['rgxp'])));
 
     if (preg_match($rgxp, $text, $list, 0b100000000) < 1) return false;
@@ -150,7 +164,7 @@ class Block {
       if ($this->tokens[0]['type'] !== XML_CDATA_SECTION_NODE && !isset($this->tokens[$idx])) {
         $this->tokens[] = Tokenizer::blockmatch($lexeme);
       }
-
+      $context = $this->evaluate($context, $current, $next);
       $context = $this->evaluate($context, $lexeme, ...array_slice($this->tokens, -2));
     }
     return $this;
