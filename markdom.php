@@ -43,12 +43,12 @@ class Token {
 class Tokenizer {
   const BLOCK = [
   //'rgxp' => '/\s*(?:(\d+\.)|(- )|(#{1,6})|(`{3})|(>)|(-{3,})|(\/\/)|(\S))/Ai',
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,   'DATA'   , 'blockquote',  'hr'  , 'comment',   'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' ,'::(?=[sp])',   '> ?'     , '-{3,}',  '\/\/'  ,'(?=\S)'],
-    'join' => [ false   , false,  false  ,    true    ,    false    ,  false ,  false   ,  false ],
-    'type' => [ 'li'    , 'li' ,    1    ,      4     ,     'p'     ,    0   ,    8     ,    1   ],
+    'name' => [   'pin'  , 'ol'    , 'ul' ,  'h%d'  ,   'DATA'   , 'blockquote',  'hr'  , 'comment',   'p'  ],
+    'rgxp' => ['\?[a-z]+','\d+\. ?', '- ' ,'#{1,6}' ,'::(?=[sp])',   '> ?'     , '-{3,}',  '\/\/'  ,'(?=\S)'],
+    'join' => [   false  , false   , false,  false  ,    true    ,    false    ,  false ,  false   ,  false ],
+    'type' => [     7    , 'li'    , 'li' ,    1    ,      4     ,     'p'     ,    0   ,    8     ,    1   ],
   ];
-  // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, COMMENT: 8; EMPTY: 0 (non-standard)
+  // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, PI: 7, COMMENT: 8; EMPTY: 0 (non-standard)
 
   // consider changing ``` to ::, esp since then classes can be added nicer: ::script|pre|style
   
@@ -75,12 +75,11 @@ class Tokenizer {
   static public function blockmatch($text) {
     //7.4   sprintf("/%s/Ai", implode('|', array_map(fn($re) => "({$re})", self::BLOCK['rgxp']));
     //8.0 weakMap this
-    $rgxp = sprintf("/\s*(?:%s)/Ai", implode('|', array_map(function($re) { 
+    $rgxp = sprintf("/\s*(?:%s)/i", implode('|', array_map(function($re) { 
       return "({$re})"; // add capture for css classes or attributes can be (?:\.([a-z]+)\s), so ##.help This will have a class applied or
     }, self::BLOCK['rgxp'])));
 
     if (preg_match($rgxp, $text, $list, 0b100000000) < 1) return false;
-
     $match  = array_pop($list); // last match contains match & offset: [string $symbol, int offset]
     $column = array_combine(array_keys(self::BLOCK), array_column(self::BLOCK, count($list) - 1));
 
@@ -178,6 +177,10 @@ class Block {
 
     if ($context instanceof DOMCdataSection || $context instanceof DOMComment) {
       $context->appendData($lexeme);
+    } elseif ($token['type'] === XML_PI_NODE) {
+      $owner = $context->ownerDocument;
+      $owner->insertBefore(new DOMProcessingInstruction(substr($token['mark'],1), trim(substr($lexeme, $token['trim']))), $owner->firstChild);
+      return $context;
     } else if ($token['name'] === 'comment') {
       $element = $context->appendChild($this->doc->createComment(trim($lexeme)));
     } else if ($token['join'] && $token['type'] === XML_CDATA_SECTION_NODE) {
