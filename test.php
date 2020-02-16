@@ -35,6 +35,6 @@ include('vendor-markdown.php');
 include('markdom.php');
 // echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM($test);
 
-echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM('example.md');
+echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new XMD('example.md');
 
 ?>

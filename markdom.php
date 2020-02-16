@@ -7,10 +7,12 @@
   [ ] think of syntax to post-render certain lists into definition lists
   [ ] consider |mark| into post-render <strong><strong>mark</strong></strong> (****mark****) thing
   [ ] deal with abstract HTML class (by removing it and placing code elsewhere)
+  [ ] anything in code element should be treated as character data!
+  [ ] rentering inline elements should be itempotent (always wanted to use that word) so that order of replacing elements doesnt matter, produces same output always
 */
 
-/****         ************************************************************************** MarkDom */
-class MarkDOM {
+/****     ********************************************************************************** XMD */
+class XMD {
   public function __construct($path, $root = 'article') {
     $this->doc = new DOMDocument('1.0', 'UTF-8');
     $this->doc->formatOutput = true;
@@ -41,14 +43,14 @@ class Token {
 class Tokenizer {
   const BLOCK = [
   //'rgxp' => '/\s*(?:(\d+\.)|(- )|(#{1,6})|(`{3})|(>)|(-{3,})|(\/\/)|(\S))/Ai',
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/'  , '\S'  ],
-    'join' => [ false   , false,  false  ,  true  ,    false    ,  false ,  false   , false ],
-    'type' => [ 'li'    , 'li' ,    1    ,    4   ,     'p'     ,    0   ,    8     ,   1   ],
+    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,   'DATA'   , 'blockquote',  'hr'  , 'comment',   'p'  ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' ,'::(?=[sp])',   '> ?'     , '-{3,}',  '\/\/'  ,'(?=\S)'],
+    'join' => [ false   , false,  false  ,    true    ,    false    ,  false ,  false   ,  false ],
+    'type' => [ 'li'    , 'li' ,    1    ,      4     ,     'p'     ,    0   ,    8     ,    1   ],
   ];
   // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, COMMENT: 8; EMPTY: 0 (non-standard)
 
-  // consider changing ``` to ::, esp since then classes can be added nicer: ::.javascript  ::script|pre|style
+  // consider changing ``` to ::, esp since then classes can be added nicer: ::script|pre|style
   
   // these are really better suited to a concept of 'fences', and pre would be involved in one. lots of pondering still
   const BOUND = [
@@ -139,14 +141,16 @@ class Block {
     if ($this->status === self::READY) {
       
       if ($token = Tokenizer::blockmatch($text)) {
-        
-        $this->tokens[] = $token;
+
         $this->status   = self::SCANNING;
 
         if ($token['join']) {
           $this->halt_flag = $token['mark'];
+          $token['name'] = trim(substr($text, strlen($token['mark'])));
         } else $capture = true;
-
+        
+        $this->tokens[] = $token;
+        
       }
 
     } else if (rtrim($text) === $this->halt_flag) $this->finished(true);     
@@ -164,7 +168,7 @@ class Block {
       if ($this->tokens[0]['type'] !== XML_CDATA_SECTION_NODE && !isset($this->tokens[$idx])) {
         $this->tokens[] = Tokenizer::blockmatch($lexeme);
       }
-      $context = $this->evaluate($context, $current, $next);
+      // $context = $this->evaluate($context, $current, $next);
       $context = $this->evaluate($context, $lexeme, ...array_slice($this->tokens, -2));
     }
     return $this;
@@ -175,10 +179,10 @@ class Block {
     if ($context instanceof DOMCdataSection || $context instanceof DOMComment) {
       $context->appendData($lexeme);
     } else if ($token['name'] === 'comment') {
-       $element = $context->appendChild($this->doc->createComment(trim($lexeme)));
+      $element = $context->appendChild($this->doc->createComment(trim($lexeme)));
     } else if ($token['join'] && $token['type'] === XML_CDATA_SECTION_NODE) {
-        $element = $context->appendChild($this->doc->createElement($token['name']));
-        return $element->appendChild($this->doc->createCDATASection($lexeme));
+      $element = $context->appendChild($this->doc->createElement($token['name']));
+      return $element->appendChild($this->doc->createCDATASection($lexeme));
 
     } else {
       $element = $this->doc->createElement(sprintf($token['name'], $token['trim']));
@@ -186,7 +190,7 @@ class Block {
       if ($token['type'] !== 0) {
         if (is_int($token['type'])) {
           // trim the gunk off the front of strings
-          $element->nodeValue = trim(substr($lexeme, $token['name'] == 'p' ? 0 : $token['trim']));
+          $element->nodeValue = trim(substr($lexeme, $token['trim']));
         } else {
           
           if ($previous === null) {
@@ -233,7 +237,7 @@ class Inline {
   }
   
   public function parse2($elem) {
-    // this is part of a rewrite of the inline parser so it can easily be used on its own, outside of the Markdom
+    // this is part of a rewrite of the inline parser so it can easily be used on its own, outside of the xMD
     // instance (like in model output). I want to get something in place that replaceChilds text nodes with proper
     // element nodes, so the constant saving and outputing and injecting/appending of xml isn't done unnecessarily
     foreach (INLINE::tags as $name => $re) {
