@@ -60,7 +60,6 @@ class Inline {
     return [$match[0][1], $end, $match[0][1] + $end, $node];
   }
   
-  
   private function link($match)
   {
     if ($match[1][0]) {
