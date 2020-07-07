@@ -1,8 +1,8 @@
 # MarkDOM 
 
-A markdown parser that constructs perfectly formated valid DOM objects.
+A markdown parser that constructs valid, formated DOM objects.
 
-Well-formatted html can be precisely targeted with CSS without necessity of classes, id's and customized markup to accomodate stylesheets. This formatter intends to make HTML construction a priority, and as such, empowers broader interactive design using general markdown conventions. Further,  properly created DOM documents can be queried via xpath, enabling callbacks that can be utilized elegantly for further formatting (like adding class and id attributes, semantic revisions, etc).
+Well-formatted html can be precisely targeted with CSS without too much utilization of classes, id's or customized markup to accomodate stylesheets. This formatter intends to make HTML construction a priority, and as such, empowers broader interactive design using general markdown conventions. Further,  properly created DOM documents can be queried via xpath, enabling callbacks that can be utilized elegantly for further formatting (like adding class and id attributes, semantic revisions, etc).
 
 ## Goals
 

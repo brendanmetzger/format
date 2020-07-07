@@ -28,13 +28,15 @@ EOD;
 // echo "------ ORIGINAL --------\n\n\n\n ".$test . "\n\n\n\n";
 
 
-include('vendor-markdown.php');
+// include('vendor-markdown.php');
 // echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text($test) . "\n";
 
 
-include('markdom.php');
+include('diatom.php');
+include('block.php');
+
 // echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM($test);
 
-echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM('example.md');
+echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDown('example.md');
 
 ?>
