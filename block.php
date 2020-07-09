@@ -1,157 +1,167 @@
 <?php
 
-/****         ************************************************************************** MarkDom */
-class MarkDown {
-  private $doc;
-  public function __construct($path, $root = '<article/>') {
-    $this->doc = new Document($root);
-    $scanner = Tokenizer::scan(new SplFileObject($path), $this->doc);
-    foreach ($scanner as $block) {
-      $rendered = $block->process($this->doc->documentElement);
+include('diatom.php');
+include('inline.php');
+
+class Parse {
+  private $DOM, $context = null;
+  
+  public function __construct($path, $xml = '<article/>', $xpath = '/*') {
+    $this->DOM     = new Document($xml);
+    $this->context = $this->DOM->select($xpath);
+
+    foreach ($this->scan(new SplFileObject($path)) as $block) {
+      print_r($block);
+      $rendered = $block->process($this->context);
     }
   }
 
-  public function __toSTring() {
-    // return 'finish';
-    return $this->doc->saveXML();
-  }
-}
-
-class Tokenizer {
-  const BLOCK = [
-  //'rgxp' => '/\s*(?:(\d+\.)|(- )|(#{1,6})|(`{3})|(>)|(-{3,})|(\/\/)|(\S))/Ai',
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/'  , '\S'  ],
-    'join' => [ false   , false,  false  ,  true  ,    false    ,  false ,  false   , false ],
-    'type' => [ 'li'    , 'li' ,    1    ,    4   ,     'p'     ,    0   ,    8     ,   1   ],
-  ];
-  // XML_%s_NODE types as follows: ELEMENT: 1, TEXT: 3, CDATA_SECTION: 4, COMMENT: 8; EMPTY: 0 (non-standard)
-
-
-  // these are really better suited to a concept of 'fences', and pre would be involved in one. lots of pondering still
   
-  static public function blockmatch($text) {
-    $rgxp = sprintf("/\s*(?:%s)/Ai", implode('|', array_map(fn($re) => "({$re})", self::BLOCK['rgxp'])));
-
-    if (preg_match($rgxp, $text, $list, 0b100000000) < 1) return false;
-
-    [$symbol, $offset] = array_pop($list); // last match contains match & offset: [string $symbol, int offset]
-    $column = array_combine(array_keys(self::BLOCK), array_column(self::BLOCK, count($list) - 1));
-
-    return array_merge([
-      'mark'  => $symbol,
-      'trim'  => strlen($symbol),
-      'depth' => floor($offset / 2),
-    ], $column);
-  }
-  
-  public function boundmatch() {
-    $chars = count_chars(implode('', self::BOUND), 3);
-  }
-  
-  static public function scan($iterator, DOMDocument $context) {
-    $block = new Block($context);
+  private function scan($iterator)
+  {
+    $block = new Block;
 
     foreach ($iterator as $line) {
-      if ($block->capture($line)) continue;
+      $result = $block->capture($line);
+      if ($block === $result) continue;
       yield $block;
-      $block = new Block($context);
+      $block = $result;
     }
-    
-    yield $block; // in case file does not end in newline or is empty;
+    yield $block;
+  }
+  
+  public function __toSTring() {
+    return $this->DOM->saveXML();
   }
 }
 
-class Block {
-  const READY = 0; const SCANNING = 1; const FINISH = 2;
+class Token {
+  public $mark, $trim, $depth, $text, $name, $rgxp, $type, $resolved = true;
+  private $halt = null;
   
-  public $doc, $context = null;
-  private $status = 0, $lexeme = [], $tokens = [], $halt_flag = '';
-    
-  public function __construct(DOMDocument $doc) {
-    $this->doc = $doc;
+  function __construct($data) {
+    foreach ($data as $prop => $value) $this->{$prop} = $value;
+    $this->resolved = ! ($this->type === 4 || $this->name == 'ol' || $this->name == 'ul');
   }
   
-  public function finished(?bool $set = false) {
-    if ($set) $this->status = self::FINISH;
-    return $this->status === self::FINISH;
-  }
-  
-  public function capture(string $text, $capture = false) {
-    if ($this->status === self::READY) {
-      
-      if ($token = Tokenizer::blockmatch($text)) {
-        
-        $this->tokens[] = $token;
-        $this->status   = self::SCANNING;
-
-        if ($token['join'])
-          $this->halt_flag = $token['mark'];
-        else
-          $capture = true;
-
+  // this will only get called by capturing blocks
+  public function interpret(Block $block)
+  {
+    if ($this->type === 4) {
+      if ($this->halt === null) {
+        $this->halt = $this->mark;
+        return $block;
+      }  elseif ($this->halt == trim($this->text)) {
+        return new Block;
       }
+      return $block->push($this);
+      
+    } else {
+      $last = $block->lastToken();
+      if ($last && $this->name != $last->name && $this->depth == $last->depth) {
+        return new Block($this);
+      }
+      
+      return $block->push($this);
+    }
+  }
+  
+}
 
-    } else if (rtrim($text) === $this->halt_flag) $this->finished(true);     
-      else $capture = true;
-    
-    if ($capture) $this->lexeme[] = $text;
-    
-    return ! $this->finished();
+
+class Block {
+  
+  const MAP = [
+    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/'  , '\S'  ],
+    'type' => [    1    ,   1  ,    1    ,    4   ,      1      ,    0   ,    8     ,   1   ],
+  ];
+  
+  private $token = [];
+  private static $rgxp;
+
+  public function __construct(?Token $token = null) {
+    self::$rgxp ??= sprintf("/\s*(?:%s)/Ai", implode('|', array_map(fn($x) => "($x)", self::MAP['rgxp'])));
+    if ($token) $this->token[] = $token;
+  }
+  
+  
+  public function parse($text) {
+
+    if (preg_match(self::$rgxp, $text, $list, PREG_OFFSET_CAPTURE) < 1) return false;
+
+    [$symbol, $offset] = array_pop($list); // last match contains match & offset: [string $symbol, int offset]
+
+    $column = array_combine(array_keys(self::MAP), array_column(self::MAP, count($list) - 1));
+    $trim = strlen($symbol);
+    $depth = floor($offset / 2) + 1;
+    return new Token (array_merge($column, [
+      'mark'  => $symbol,
+      'trim'  => $trim,
+      'depth' => $depth,
+      'text'  => $text,
+      'name'  => sprintf($column['name'], $trim),
+      ]));
+  }
+  
+  public function push(Token $token): Block {
+    $this->token[] = $token;
+    return $this;
+  }
+  
+  public function lastToken() {
+    return $this->token[count($this->token) - 1] ?? null;
+  }
+  
+  public function capture(string $text)
+  {
+    if (! $token = $this->parse($text)) return $this;
+
+    if (! $token->resolved)             return $token->interpret($this);
+
+    return empty($this->token) ? $this->push($token) : new Block($token);
   }
   
   public function process(DOMElement $context) {
-    
-    foreach($this->lexeme as $idx => $lexeme) { 
 
-      if ($this->tokens[0]['type'] !== XML_CDATA_SECTION_NODE && !isset($this->tokens[$idx])) {
-        $this->tokens[] = Tokenizer::blockmatch($lexeme);
+    foreach($this->token as $token) {
+      
+      if ($context instanceof DOMCharacterData) {
+        $context->appendData($token->text);
+        continue;
       }
-
-      $context = $this->evaluate($context, $lexeme, ...array_slice($this->tokens, -2));
+      
+      $context = $this->evaluate($context, $token);
     }
     return $this;
   }
   
-  private function evaluate($context, $lexeme, array $token, $previous = null) {
+  private function evaluate($context, $token)
+  {
+    $type = $token->type;
+    $trim = $token->trim;
+    $text = $token->text;
+    $name = sprintf($token->name, $trim);
+    
+    if ($name === 'comment')
+      return $context->appendChild(new DOMComment(trim($text, " \t\n\r\0\x0B/")));
+    
+    if ($type === XML_CDATA_SECTION_NODE)
+      return $context->appendChild(new Element($name))->appendChild(new DOMCdataSection($text));
+    
+    $element = $context->appendChild(new Element($name));
 
-    if ($context instanceof DOMCdataSection || $context instanceof DOMComment) {
-      $context->appendData($lexeme);
-    } else if ($token['name'] === 'comment') {
-       $element = $context->appendChild($this->doc->createComment(trim($lexeme)));
-    } else if ($token['join'] && $token['type'] === XML_CDATA_SECTION_NODE) {
-        $element = $context->appendChild($this->doc->createElement($token['name']));
-        return $element->appendChild($this->doc->createCDATASection($lexeme));
-
-    } else {
-      $element = $this->doc->createElement(sprintf($token['name'], $token['trim']));
+    if ($type !== 0) {
+      $element->nodeValue = trim(substr($text, $name == 'p' ? 0 : $trim * $token->depth));
       
-      if ($token['type'] !== 0) {
-        if (is_int($token['type'])) {
-          // trim the gunk off the front of strings
-          $element->nodeValue = trim(substr($lexeme, $token['name'] == 'p' ? 0 : $token['trim']));
-        } else {
-          
-          if ($previous === null) {
-            $child = $element->appendChild($this->doc->createElement($token['type']));
-            $child->nodeValue = substr(trim($lexeme), $token['trim']);
-              
-          } else if ($previous['depth'] != $token['depth']) {
-            // create new Block instead of all this razzledazzle
-            echo "previous depth is {$previous['depth']} — gotta make a new type for {$token['name']} at {$token['depth']}\n";
-            // if depth > last depth OR type != last type: new context
-            // if depth < last depth: parent's parent context
-            
-          } else if ($previous['type'] != $token['type']) {
-            // remember the type, and if it changes, must create a new child and embed in a new context.
-            echo "previous type is {$previous['type']} — gotta make a new type for {$token['name']}\n";
-          }
-        }
+      if ($type == 'li') {
+        $element->setAttribute('merge', $token->depth);
       }
-      $context->appendChild($element);
     }
-    
-    
+
     return $context;
   }
 }
+
+$parser = new Parse('example.md');
+echo $parser;
