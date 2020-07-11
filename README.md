@@ -22,12 +22,13 @@ A markdown parser that constructs valid, formated DOM objects.
 - [ ] render blockquotes
 - [x] render pre
 - [ ] capture new lines in pre
-- [ ] DOM converts back to markdown
-- [ ] Parser callbacks (ie, encountering h2 inserts self and following p's into &lt;section&gt;)
-  - [ ] render figure and figcaptions (using context callback from preceding todo)
--  [ ] TYPOGRAPHY: replace ' with actual apostrophe
--  [ ] deal with & and other entities
--  [ ] think of syntax to post-render certain lists into definition lists
+- [ ] DOM to markdown converter
+- [x] section-izing parser callback implementation
+- [ ] design method to render figure and figcaptions (using context callback from preceding prob.. see note)
+- [ ] replace ' with actual apostrophe
+- [ ] deal with & and other entities
+- [ ] think of syntax to post-render certain lists into definition lists
+
 
   
 #### Under Consideration

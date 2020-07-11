@@ -2,13 +2,14 @@
 $mark = microtime(true);
 
 class Parse {
-  private $DOM, $context = null;
+  private $DOM, $context = null, $callbacks = [];
   
   public function __construct(string $path, string $xml = '<article/>', string $xpath = '/*') {
-    $this->DOM     = new DOMDocument;
+    $this->DOM = new DOMDocument;
     $this->DOM->formatOutput = true;
     $this->DOM->loadXML($xml);
-    $this->context = (new DOMXpath($this->DOM))->query($xpath)[0] ?? null;
+    $this->xpath = new DOMXpath($this->DOM);
+    $this->context = $this->xpath->query($xpath)[0] ?? null;
     foreach ($this->scan(new SplFileObject($path)) as $block) $block->process($this->context);
   }
 
@@ -25,8 +26,16 @@ class Parse {
     yield $block;
   }
   
-  public function __toSTring() {
+  public function __toString() {
+    foreach ($this->callbacks as $callback) {
+      print_r($callback);
+      $callback->call($this, $this->DOM);
+    };
     return $this->DOM->saveXML();
+  }
+  
+  public function addCallback(callable $callback) {
+    $this->callbacks[] = $callback;
   }
 }
 
@@ -156,6 +165,14 @@ class Block {
   }
 }
 
+/*
+  TODO consider extending DOMText so usage isn't
+  
+  Inline::parse($elem);
+  
+  $parent->appendChild(new Inline($token->value));
+  and can do things like $this->splitText($offset)...
+*/
 
 class Inline {
   private static $rgxp = null;
@@ -210,7 +227,7 @@ class Inline {
   private function basic($match)
   {
     $symbol = $match[1][0];
-    $node   = $this->DOM->createElement(Token::INLINE[$symbol], trim($match[0][0], $symbol));
+    $node   = new DOMElement(Token::INLINE[$symbol], trim($match[0][0], $symbol));
     $out = strlen($match[0][0]);
     return [$match[0][1], $out, $match[0][1] + $out, $node];
   }
@@ -243,6 +260,27 @@ class Inline {
 
 
 $parser = new Parse('example.md');
+
+$parser->addCallback(function(DOMDocument $document) {
+  
+  foreach ($this->xpath->query('//article/h2[not(ancestor::section)]') as $mark) {
+    $section = $document->createElement('section');
+    $mark = $mark->parentNode->replaceChild($section, $mark);
+    $section->appendChild($mark);
+    $sibling = $section->nextSibling;
+    while($sibling && $sibling->nodeName != 'h2') {
+      $next = $sibling->nextSibling;
+      $section->appendChild($sibling);
+      $sibling = $next;
+    }
+  }
+  
+  // find all sections without id
+  foreach($this->xpath->query('//section[not(@id)]/h2') as $idx => $h2)
+    $h2->parentNode->setAttribute('id', strtoupper(preg_replace('/[^a-z0-9]/i','', $h2->nodeValue)));
+  
+});
+
 echo $parser;
 
 echo (microtime(true) - $mark). 'sec, mem:' . (memory_get_peak_usage() / 1000) . "kb\n";
