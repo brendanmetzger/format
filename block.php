@@ -1,6 +1,5 @@
 <?php
 $mark = microtime(true);
-include('inline.php');
 
 class Parse {
   private $DOM, $context = null;
@@ -10,13 +9,9 @@ class Parse {
     $this->DOM->formatOutput = true;
     $this->DOM->loadXML($xml);
     $this->context = (new DOMXpath($this->DOM))->query($xpath)[0] ?? null;
-
-    foreach ($this->scan(new SplFileObject($path)) as $block) {
-      $rendered = $block->process($this->context);
-    }
+    foreach ($this->scan(new SplFileObject($path)) as $block) $block->process($this->context);
   }
 
-  
   private function scan($iterator)
   {
     $block = new Block;
@@ -36,6 +31,23 @@ class Parse {
 }
 
 class Token {
+  
+  const BLOCK = [
+    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  ,'comment',  'p'  ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/' , '\S'  ],
+  ];
+  
+  const INLINE = [
+    '~~' => 's',
+    '**' => 'strong',
+    '__' => 'em',
+    '``' => 'time',
+    '`'  => 'code',
+    '^^' => 'abbr',
+    '|'  => 'mark',
+    '"'  => 'q',
+  ];
+  
   public $flag, $trim, $depth, $text, $name, $rgxp, $value, $grouped = false;
   
   function __construct($data) {
@@ -44,53 +56,36 @@ class Token {
     $this->grouped = in_array($this->name, ['pre', 'ol','ul']);
   }
   
-  // this will only get called by capturing blocks
   public function interpret(Block $block)
   {
     if ($block->trap || $this->name === 'pre') {
-      echo "trapping {$block->trap} \n";
-      if ($block->trap === false) {
-        echo "setting trap!\n";
-        $block->trap = $this->flag;
+
+      if ($block->trap === false && $block->trap = $this->flag)
         return $block;
-      }
-      elseif ($block->trap == trim($this->text)) {
-        echo "closing trap!\n";
+
+      elseif ($block->trap == trim($this->text))
         return new Block;
-      }
-        
-      else {
-        $this->name = 'pre';
-        return $block->push($this);
-      }
-        
-      
-    } else {
-      
-      $last = $block->lastToken();
-      if ($last && $this->name != $last->name && $this->depth == $last->depth)
-        return new Block($this);
-      else
-        return $block->push($this);
+
+      $this->name = 'pre';
+      return $block->push($this);
     }
+      
+    $last = $block->lastToken();
+    $done = $last && $this->name != $last->name && $this->depth == $last->depth;
+
+    return $done ? new Block($this) : $block->push($this);
   }
-  
 }
 
 
 class Block {
-  
-  const MAP = [
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  ,'comment',  'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/' , '\S'  ],
-  ];
-  
+    
   public  $trap = false;
   private $token = [];
   private static $rgxp;
 
   public function __construct(?Token $token = null) {
-    self::$rgxp ??= sprintf("/\s*(?:%s)/Ai", implode('|', array_map(fn($x) => "($x)", self::MAP['rgxp'])));
+    self::$rgxp ??= sprintf("/\s*(?:%s)/Ai", implode('|', array_map(fn($x) => "($x)", Token::BLOCK['rgxp'])));
     if ($token) $this->token[] = $token;
   }
   
@@ -102,7 +97,7 @@ class Block {
     $trim = strlen($symbol);
 
     return new Token ([
-      'name'  => sprintf(self::MAP['name'][count($list) - 1], $trim),
+      'name'  => sprintf(Token::BLOCK['name'][count($list) - 1], $trim),
       'flag'  => $symbol,
       'trim'  => $trim,
       'depth' => floor($offset / 2) + 1,
@@ -130,7 +125,7 @@ class Block {
     return empty($this->token) ? $this->push($token) : new Block($token);
   }
   
-  public function process(DOMElement $context)
+  public function process(DOMElement $context): void
   {
     foreach($this->token as $token) {
       
@@ -138,10 +133,8 @@ class Block {
         $context->appendData($token->text);
         continue;
       }
-         
       $context = $this->append($context, $token);
     }
-    return $this;
   }
   
   private function append ($context, $token)
@@ -151,10 +144,9 @@ class Block {
     
     $element = $context->appendChild(new DOMElement($token->name));
     
-    if ($token->name === 'pre') {
+    if ($token->name === 'pre')
       return $element->appendChild(new DOMCdataSection($token->text));
-    }
-
+    
     if ($token->name === 'hr') return $context;
 
     $element->nodeValue = $token->value;
@@ -163,6 +155,92 @@ class Block {
     return $context;
   }
 }
+
+
+class Inline {
+  private static $rgxp = null;
+  
+  private $DOM, $node;
+  
+  public function __construct(DOMElement $node) {
+    self::$rgxp ??= [
+      'pair' => sprintf('/(%s)(?:(?!\1).)+\1/u', join('|', array_map(fn($k)=> addcslashes($k, '!..~'), array_keys(Token::INLINE)))),
+      'link' => '/(!?)\[([^\]]+)\]\((\S+)\)/u'
+    ];
+    
+    $this->DOM  = $node->ownerDocument;
+    $this->node = $node;
+  } 
+  
+  public function parse(?DOMElement $node = null) {
+    $node ??= $this->node;
+
+    $text = $node->nodeValue;
+    
+    $matches = [
+      ...$this->gather(self::$rgxp['link'], $text, [$this, 'link']),
+      ...$this->gather(self::$rgxp['pair'], $text, [$this, 'basic']),
+    ];
+    
+    if ($node->nodeName == 'li')
+      array_push($matches, ...$this->gather('/^\[([x\s])\](.*)$/u', $text, [$this, 'input']));
+    
+    usort($matches, fn($A, $B)=> $B[0] <=> $A[0]);
+    
+    foreach ($matches as $i => [$in, $out, $end, $elem]) {
+      // skip nested.. parsed separately
+      if (($matches[$i+1][2] ?? 0) > $end) continue;
+      
+      $node->replaceChild($elem, $node->firstChild->splitText($in)->splitText($out)->previousSibling);
+      $this->parse($elem);
+    }
+    return $node;
+  }
+  
+  static public function format($node) {
+    return (new self($node))->parse();
+  }
+  
+  public function gather($rgxp, $text, callable $callback)
+  {
+    preg_match_all($rgxp, $text, $matches, PREG_OFFSET_CAPTURE|PREG_SET_ORDER);
+    return array_map($callback, $matches);
+  }
+    
+  private function basic($match)
+  {
+    $symbol = $match[1][0];
+    $node   = $this->DOM->createElement(Token::INLINE[$symbol], trim($match[0][0], $symbol));
+    $out = strlen($match[0][0]);
+    return [$match[0][1], $out, $match[0][1] + $out, $node];
+  }
+  
+  private function link($match)
+  {
+    if ($match[1][0]) {
+      $node = $this->DOM->createElement('img');
+      $node->setAttribute('src', $match[3][0]);
+      $node->setAttribute('alt',  $match[2][0]);
+    } else {
+      $node = $this->DOM->createElement('a', $match[2][0]);
+      $node->setAttribute('href', $match[3][0]);
+    }
+    $out = strlen($match[0][0]);
+    return [$match[0][1], $out, $match[0][1] + $out, $node];
+  }
+
+  private function input($match)
+  {
+    $node = $this->DOM->createElement('label', $match[2][0]);
+    $input = $node->insertBefore($this->DOM->createElement('input'), $node->firstChild);
+    $input->setAttribute('type', 'checkbox');
+    if ($match[1][0] != ' ') $input->setAttribute('checked', 'checked');
+    $out = strlen($match[0][0]);
+    return [0, $out, $out, $node];
+  }
+}
+
+
 
 $parser = new Parse('example.md');
 echo $parser;

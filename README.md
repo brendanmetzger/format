@@ -25,7 +25,10 @@ A markdown parser that constructs valid, formated DOM objects.
 - [ ] DOM converts back to markdown
 - [ ] Parser callbacks (ie, encountering h2 inserts self and following p's into &lt;section&gt;)
   - [ ] render figure and figcaptions (using context callback from preceding todo)
-  
+-  [ ] TYPOGRAPHY: replace ' with actual apostrophe
+-  [ ] deal with & and other entities
+-  [ ] think of syntax to post-render certain lists into definition lists
+
   
 #### Under Consideration
 - [x] Checkboxes and perhaps other inputs (select menus, input ranges... things that are useful for interactivity)
