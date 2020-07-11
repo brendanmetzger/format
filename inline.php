@@ -18,7 +18,7 @@ class Inline {
   
   private $DOM, $node;
   
-  public function __construct(Element $node) {
+  public function __construct(DOMElement $node) {
     self::$rgxp ??= [
       'pair' => sprintf('/(%s)(?:(?!\1).)+\1/u', join('|', array_map(fn($k)=> addcslashes($k, '!..~'), array_keys(self::MAP)))),
       'link' => '/(!?)\[([^\]]+)\]\((\S+)\)/u'
@@ -28,7 +28,7 @@ class Inline {
     $this->node = $node;
   } 
   
-  public function parse(?Element $node = null) {
+  public function parse(?DOMElement $node = null) {
     $node ??= $this->node;
 
     $text = $node->nodeValue;
@@ -51,6 +51,10 @@ class Inline {
       $this->parse($elem);
     }
     return $node;
+  }
+  
+  static public function format($node) {
+    return (new self($node))->parse();
   }
   
   public function gather($rgxp, $text, callable $callback)

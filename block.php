@@ -1,17 +1,17 @@
 <?php
-
-include('diatom.php');
+$mark = microtime(true);
 include('inline.php');
 
 class Parse {
   private $DOM, $context = null;
   
-  public function __construct($path, $xml = '<article/>', $xpath = '/*') {
-    $this->DOM     = new Document($xml);
-    $this->context = $this->DOM->select($xpath);
+  public function __construct(string $path, string $xml = '<article/>', string $xpath = '/*') {
+    $this->DOM     = new DOMDocument;
+    $this->DOM->formatOutput = true;
+    $this->DOM->loadXML($xml);
+    $this->context = (new DOMXpath($this->DOM))->query($xpath)[0] ?? null;
 
     foreach ($this->scan(new SplFileObject($path)) as $block) {
-      print_r($block);
       $rendered = $block->process($this->context);
     }
   }
@@ -36,33 +36,42 @@ class Parse {
 }
 
 class Token {
-  public $mark, $trim, $depth, $text, $name, $rgxp, $type, $resolved = true;
-  private $halt = null;
+  public $flag, $trim, $depth, $text, $name, $rgxp, $value, $grouped = false;
   
   function __construct($data) {
     foreach ($data as $prop => $value) $this->{$prop} = $value;
-    $this->resolved = ! ($this->type === 4 || $this->name == 'ol' || $this->name == 'ul');
+    $this->value =  trim(substr($this->text, $this->name == 'p' ? 0 : $this->trim * $this->depth));
+    $this->grouped = in_array($this->name, ['pre', 'ol','ul']);
   }
   
   // this will only get called by capturing blocks
   public function interpret(Block $block)
   {
-    if ($this->type === 4) {
-      if ($this->halt === null) {
-        $this->halt = $this->mark;
+    if ($block->trap || $this->name === 'pre') {
+      echo "trapping {$block->trap} \n";
+      if ($block->trap === false) {
+        echo "setting trap!\n";
+        $block->trap = $this->flag;
         return $block;
-      }  elseif ($this->halt == trim($this->text)) {
+      }
+      elseif ($block->trap == trim($this->text)) {
+        echo "closing trap!\n";
         return new Block;
       }
-      return $block->push($this);
+        
+      else {
+        $this->name = 'pre';
+        return $block->push($this);
+      }
+        
       
     } else {
-      $last = $block->lastToken();
-      if ($last && $this->name != $last->name && $this->depth == $last->depth) {
-        return new Block($this);
-      }
       
-      return $block->push($this);
+      $last = $block->lastToken();
+      if ($last && $this->name != $last->name && $this->depth == $last->depth)
+        return new Block($this);
+      else
+        return $block->push($this);
     }
   }
   
@@ -72,11 +81,11 @@ class Token {
 class Block {
   
   const MAP = [
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  , 'comment',  'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/'  , '\S'  ],
-    'type' => [    1    ,   1  ,    1    ,    4   ,      1      ,    0   ,    8     ,   1   ],
+    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  ,'comment',  'p'  ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/' , '\S'  ],
   ];
   
+  public  $trap = false;
   private $token = [];
   private static $rgxp;
 
@@ -85,23 +94,20 @@ class Block {
     if ($token) $this->token[] = $token;
   }
   
-  
-  public function parse($text) {
-
+  public function parse($text)
+  {
     if (preg_match(self::$rgxp, $text, $list, PREG_OFFSET_CAPTURE) < 1) return false;
 
     [$symbol, $offset] = array_pop($list); // last match contains match & offset: [string $symbol, int offset]
-
-    $column = array_combine(array_keys(self::MAP), array_column(self::MAP, count($list) - 1));
     $trim = strlen($symbol);
-    $depth = floor($offset / 2) + 1;
-    return new Token (array_merge($column, [
-      'mark'  => $symbol,
+
+    return new Token ([
+      'name'  => sprintf(self::MAP['name'][count($list) - 1], $trim),
+      'flag'  => $symbol,
       'trim'  => $trim,
-      'depth' => $depth,
+      'depth' => floor($offset / 2) + 1,
       'text'  => $text,
-      'name'  => sprintf($column['name'], $trim),
-      ]));
+    ]);
   }
   
   public function push(Token $token): Block {
@@ -113,51 +119,46 @@ class Block {
     return $this->token[count($this->token) - 1] ?? null;
   }
   
-  public function capture(string $text)
+  public function capture(string $line)
   {
-    if (! $token = $this->parse($text)) return $this;
-
-    if (! $token->resolved)             return $token->interpret($this);
+    if (! $token = $this->parse($line))
+      return $this;
+    
+    if ($token->grouped || $this->trap)
+      return $token->interpret($this);
 
     return empty($this->token) ? $this->push($token) : new Block($token);
   }
   
-  public function process(DOMElement $context) {
-
+  public function process(DOMElement $context)
+  {
     foreach($this->token as $token) {
       
       if ($context instanceof DOMCharacterData) {
         $context->appendData($token->text);
         continue;
       }
-      
-      $context = $this->evaluate($context, $token);
+         
+      $context = $this->append($context, $token);
     }
     return $this;
   }
   
-  private function evaluate($context, $token)
+  private function append ($context, $token)
   {
-    $type = $token->type;
-    $trim = $token->trim;
-    $text = $token->text;
-    $name = sprintf($token->name, $trim);
+    if ($token->name == 'comment')
+      return $context->appendChild(new DOMComment($token->value));
     
-    if ($name === 'comment')
-      return $context->appendChild(new DOMComment(trim($text, " \t\n\r\0\x0B/")));
+    $element = $context->appendChild(new DOMElement($token->name));
     
-    if ($type === XML_CDATA_SECTION_NODE)
-      return $context->appendChild(new Element($name))->appendChild(new DOMCdataSection($text));
-    
-    $element = $context->appendChild(new Element($name));
-
-    if ($type !== 0) {
-      $element->nodeValue = trim(substr($text, $name == 'p' ? 0 : $trim * $token->depth));
-      
-      if ($type == 'li') {
-        $element->setAttribute('merge', $token->depth);
-      }
+    if ($token->name === 'pre') {
+      return $element->appendChild(new DOMCdataSection($token->text));
     }
+
+    if ($token->name === 'hr') return $context;
+
+    $element->nodeValue = $token->value;
+    Inline::format($element);      
 
     return $context;
   }
@@ -165,3 +166,5 @@ class Block {
 
 $parser = new Parse('example.md');
 echo $parser;
+
+echo (microtime(true) - $mark). 'sec, mem:' . (memory_get_peak_usage() / 1000) . "kb\n";
