@@ -9,7 +9,7 @@ class Parse {
     $this->DOM->formatOutput = true;
     $this->DOM->loadXML($xml);
     $this->xpath = new DOMXpath($this->DOM);
-    $this->context = $this->xpath->query($xpath)[0] ?? null;
+    $this->context = $this->xpath->query($xpath)[0] ?? $this->DOM->documentElement;
     foreach ($this->scan(new SplFileObject($path)) as $block) $block->process($this->context);
   }
 
@@ -27,10 +27,7 @@ class Parse {
   }
   
   public function __toString() {
-    foreach ($this->callbacks as $callback) {
-      print_r($callback);
-      $callback->call($this, $this->DOM);
-    };
+    foreach ($this->callbacks as $callback) $callback->call($this, $this->DOM);
     return $this->DOM->saveXML();
   }
   
@@ -57,45 +54,25 @@ class Token {
     '"'  => 'q',
   ];
   
-  public $flag, $trim, $depth, $text, $name, $rgxp, $value, $grouped = false;
+  public $flag, $trim, $depth, $text, $name, $rgxp, $value, $context = false, $element = null;
   
   function __construct($data) {
     foreach ($data as $prop => $value) $this->{$prop} = $value;
     $this->value =  trim(substr($this->text, $this->name == 'p' ? 0 : $this->trim * $this->depth));
-    $this->grouped = in_array($this->name, ['pre', 'ol','ul']);
-  }
-  
-  public function interpret(Block $block)
-  {
-    if ($block->trap || $this->name === 'pre') {
-
-      if ($block->trap === false && $block->trap = $this->flag)
-        return $block;
-
-      elseif ($block->trap == trim($this->text))
-        return new Block;
-
-      $this->name = 'pre';
-      return $block->push($this);
+    if ($this->context = in_array($this->name, ['pre', 'ol','ul'])) {
+     $this->element = ['pre' => 'code', 'blockquote' => 'p'][$this->name] ?? 'li'; 
     }
-      
-    $last = $block->lastToken();
-    $done = $last && $this->name != $last->name && $this->depth == $last->depth;
-
-    return $done ? new Block($this) : $block->push($this);
   }
 }
 
 
 class Block {
-    
-  public  $trap = false;
-  private $token = [];
+  private $token = [], $trap = false, $cursor = null;
   private static $rgxp;
 
   public function __construct(?Token $token = null) {
     self::$rgxp ??= sprintf("/\s*(?:%s)/Ai", implode('|', array_map(fn($x) => "($x)", Token::BLOCK['rgxp'])));
-    if ($token) $this->token[] = $token;
+    if ($token) $this->push($token);
   }
   
   public function parse($text)
@@ -115,27 +92,46 @@ class Block {
   }
   
   public function push(Token $token): Block {
-    $this->token[] = $token;
+    $this->token[] = $this->cursor = $token;
     return $this;
   }
   
-  public function lastToken() {
-    return $this->token[count($this->token) - 1] ?? null;
-  }
   
   public function capture(string $line)
   {
     if (! $token = $this->parse($line))
       return $this;
     
-    if ($token->grouped || $this->trap)
-      return $token->interpret($this);
+    if ($token->context || $this->trap)
+      return $this->evaluate($token);
 
-    return empty($this->token) ? $this->push($token) : new Block($token);
+    return empty($this->token) ? $this->push($token) : new self($token);
   }
+  
+  public function evaluate(Token $token)
+  {
+    if ($this->trap || $token->name === 'pre') {
+
+      if ($this->trap === false && $this->trap = $token->flag)
+        return $this;
+
+      elseif ($this->trap == trim($token->text))
+        return new self;
+
+      $token->name = 'pre';
+      return $this->push($token);
+    }
+    
+    if ($this->cursor && $token->name != $this->cursor->name && $token->depth == $this->cursor->depth)
+      return new self($token);
+        
+    return $this->push($token);
+  }
+  
   
   public function process(DOMElement $context): void
   {
+    // print_r($this);
     foreach($this->token as $token) {
       
       if ($context instanceof DOMCharacterData) {
@@ -146,20 +142,23 @@ class Block {
     }
   }
   
-  private function append ($context, $token)
+  private function append($context, $token)
   {
     if ($token->name == 'comment')
       return $context->appendChild(new DOMComment($token->value));
     
-    $element = $context->appendChild(new DOMElement($token->name));
+    if ($token->element == 'li' && $context->nodeName != $token->name)
+     $context = $context->appendChild(new DOMElement($token->name));
+    
+    $element = $context->appendChild(new DOMElement($token->element ?? $token->name));
+    
+    if ($token->name === 'hr') return $context;
     
     if ($token->name === 'pre')
       return $element->appendChild(new DOMCdataSection($token->text));
     
-    if ($token->name === 'hr') return $context;
-
     $element->nodeValue = $token->value;
-    Inline::format($element);      
+    Inline::format($element);
 
     return $context;
   }
@@ -208,7 +207,10 @@ class Inline {
       // skip nested.. parsed separately
       if (($matches[$i+1][2] ?? 0) > $end) continue;
       
-      $node->replaceChild($elem, $node->firstChild->splitText($in)->splitText($out)->previousSibling);
+      $textnode = $node->firstChild;
+      while ($textnode->nodeType !== XML_TEXT_NODE) $textnode = $textnode->nextSibling;
+
+      $node->replaceChild($elem, $textnode->splitText($in)->splitText($out)->previousSibling);
       $this->parse($elem);
     }
     return $node;

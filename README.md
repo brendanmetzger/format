@@ -21,6 +21,7 @@ A markdown parser that constructs valid, formated DOM objects.
 - [x] render Inline elements
 - [ ] render blockquotes
 - [x] render pre
+- [ ] render processing instructions
 - [ ] capture new lines in pre
 - [ ] DOM to markdown converter
 - [x] section-izing parser callback implementation
