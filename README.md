@@ -1,6 +1,6 @@
-# DOMMarkDown 
+# Modeled MarkDown 
 
-A markdown parser that constructs valid, formated DOM objects.
+A markdown parser that constructs valid, formated DOM objects, allowing callbacks to re-render documents as desired.
 
 
 ## Goals
@@ -13,28 +13,32 @@ A markdown parser that constructs valid, formated DOM objects.
 
 ### TODO
 
+- [ ] render blockquotes
+- [ ] render nested lists
+- [ ] render processing instructions
+- [ ] capture new lines in pre
+- [ ] capture links betwixt &lt; &gt;
+- [ ] titles in anchors and image captures
+- [ ] DOM back to markdown
+- [ ] design method to render figure and figcaptions (using context callback from preceding prob.. see note)
+- [ ] replace ' with actual apostrophe
+- [ ] think of syntax for definition lists
 
-- [x] render lists (including infinitely nested lists)
+- [x] render lists
 - [x] render headings
 - [x] render links
 - [x] render images
 - [x] render Inline elements
-- [ ] render blockquotes
 - [x] render pre
-- [ ] render processing instructions
-- [ ] capture new lines in pre
-- [ ] DOM to markdown converter
 - [x] section-izing parser callback implementation
-- [ ] design method to render figure and figcaptions (using context callback from preceding prob.. see note)
-- [ ] replace ' with actual apostrophe
-- [ ] deal with & and other entities
-- [ ] think of syntax to post-render certain lists into definition lists
+- [x] deal with & and other entities
 
 
   
 #### Under Consideration
-- [x] Checkboxes and perhaps other inputs (select menus, input ranges... things that are useful for interactivity)
+- [x] Checkboxes
+- [ ] other inputs (select menus, input ranges... things that are useful for interactivity)
 
 ## Notes
 
-  rather than bloat the code with complicated syntax to make things like figure and figcaption, consider contextual callbacks, ie., something like an <hr> followed by a <img> followed by a <p>text</p> would create a <figure><img/><figcaption>text</figcaption></figure>. This would be done using xpath + callbacks, ie addCallback('//hr/following-sibling::img/following-sibling::p, function($doc))
+> rather than bloat the code with complicated syntax to make things like figure and figcaption, consider contextual callbacks, ie., something like an &lt;hr&gt; followed by a &lt;img&gt; followed by a &lt;p&gt;text&lt;/p&gt; would create a &lt;figure&gt;&lt;img/&gt;&lt;figcaption&gt;text&lt;/figcaption&gt;&lt;/figure&gt;. This would be done using xpath + callbacks, ie addCallback('//hr/following-sibling::img/following-sibling::p, function($doc))

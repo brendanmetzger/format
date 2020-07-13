@@ -1,5 +1,4 @@
 <?php
-$mark = microtime(true);
 
 class Parse {
   private $DOM, $context = null, $callbacks = [];
@@ -146,8 +145,9 @@ class Block {
   {
     if ($token->name == 'comment')
       return $context->appendChild(new DOMComment($token->value));
-    
-    if ($token->element == 'li' && $context->nodeName != $token->name)
+
+    # TODO check the depth and decide if it's time to move up or down (might be a good fit for diatom Element enhancments)
+    if ($token->element && $context->nodeName != $token->name)
      $context = $context->appendChild(new DOMElement($token->name));
     
     $element = $context->appendChild(new DOMElement($token->element ?? $token->name));
@@ -157,7 +157,7 @@ class Block {
     if ($token->name === 'pre')
       return $element->appendChild(new DOMCdataSection($token->text));
     
-    $element->nodeValue = $token->value;
+    $element->nodeValue = htmlspecialchars($token->value);
     Inline::format($element);
 
     return $context;
@@ -196,6 +196,7 @@ class Inline {
     $matches = [
       ...$this->gather(self::$rgxp['link'], $text, [$this, 'link']),
       ...$this->gather(self::$rgxp['pair'], $text, [$this, 'basic']),
+      ...$this->gather('/\{([a-z]+)\:(.+?)\}/u', $text, [$this, 'tag'])
     ];
     
     if ($node->nodeName == 'li')
@@ -230,7 +231,15 @@ class Inline {
   {
     $symbol = $match[1][0];
     $node   = new DOMElement(Token::INLINE[$symbol], trim($match[0][0], $symbol));
-    $out = strlen($match[0][0]);
+    $out = mb_strlen($match[0][0]);
+    return [$match[0][1], $out, $match[0][1] + $out, $node];
+  }
+  
+  private function tag($match)
+  {
+    $node = $this->DOM->createElement('span', trim($match[2][0]));
+    $node->setAttribute('class', "tag {$match[1][0]}");
+    $out = mb_strlen($match[0][0]);
     return [$match[0][1], $out, $match[0][1] + $out, $node];
   }
   
@@ -244,7 +253,7 @@ class Inline {
       $node = $this->DOM->createElement('a', $match[2][0]);
       $node->setAttribute('href', $match[3][0]);
     }
-    $out = strlen($match[0][0]);
+    $out = mb_strlen($match[0][0]);
     return [$match[0][1], $out, $match[0][1] + $out, $node];
   }
 
@@ -254,35 +263,7 @@ class Inline {
     $input = $node->insertBefore($this->DOM->createElement('input'), $node->firstChild);
     $input->setAttribute('type', 'checkbox');
     if ($match[1][0] != ' ') $input->setAttribute('checked', 'checked');
-    $out = strlen($match[0][0]);
+    $out = mb_strlen($match[0][0]);
     return [0, $out, $out, $node];
   }
 }
-
-
-
-$parser = new Parse('example.md');
-
-$parser->addCallback(function(DOMDocument $document) {
-  
-  foreach ($this->xpath->query('//article/h2[not(ancestor::section)]') as $mark) {
-    $section = $document->createElement('section');
-    $mark = $mark->parentNode->replaceChild($section, $mark);
-    $section->appendChild($mark);
-    $sibling = $section->nextSibling;
-    while($sibling && $sibling->nodeName != 'h2') {
-      $next = $sibling->nextSibling;
-      $section->appendChild($sibling);
-      $sibling = $next;
-    }
-  }
-  
-  // find all sections without id
-  foreach($this->xpath->query('//section[not(@id)]/h2') as $idx => $h2)
-    $h2->parentNode->setAttribute('id', strtoupper(preg_replace('/[^a-z0-9]/i','', $h2->nodeValue)));
-  
-});
-
-echo $parser;
-
-echo (microtime(true) - $mark). 'sec, mem:' . (memory_get_peak_usage() / 1000) . "kb\n";

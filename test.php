@@ -28,19 +28,35 @@ $mark = microtime(true);
 // EOD;
 // echo "------ ORIGINAL --------\n\n\n\n ".$test . "\n\n\n\n";
 
-include 'vendor-markdown.php';
-
-// include('vendor-markdown.php');
-echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text(file_get_contents('example.md')) . "\n";
-
-
-
-echo  (microtime(true) - $mark). 'sec, mem:' . (memory_get_peak_usage() / 1000) . "kb\n";
-// include('diatom.php');
-// include('block.php');
+// include 'vendor-markdown.php';
 //
-// // echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDOM($test);
-//
-// echo "\n\n\n\n ------ ENHANCED --------\n\n\n\n". new MarkDown('example.md');
+// // include('vendor-markdown.php');
+// echo "\n\n\n\n ------ CLASSIC ---------\n\n\n\n" . (new Markdown)->text(file_get_contents('example.md')) . "\n";
 
-?>
+include 'src/parse.php';
+
+$parser = new Parse('examples/complex.md');
+
+$parser->addCallback(function(DOMDocument $document) {
+  
+  foreach ($this->xpath->query('//article/h2[not(ancestor::section)]') as $mark) {
+    $section = $document->createElement('section');
+    $mark = $mark->parentNode->replaceChild($section, $mark);
+    $section->appendChild($mark);
+    $sibling = $section->nextSibling;
+    while($sibling && $sibling->nodeName != 'h2') {
+      $next = $sibling->nextSibling;
+      $section->appendChild($sibling);
+      $sibling = $next;
+    }
+  }
+  
+  // find all sections without id
+  foreach($this->xpath->query('//section[not(@id)]/h2') as $idx => $h2)
+    $h2->parentNode->setAttribute('id', strtoupper(preg_replace('/[^a-z0-9]/i','', $h2->nodeValue)));
+  
+});
+
+echo $parser;
+
+echo (microtime(true) - $mark). 'sec, mem:' . (memory_get_peak_usage() / 1000) . "kb\n";
