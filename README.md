@@ -13,22 +13,23 @@ A markdown parser that constructs valid, formated DOM objects, allowing callback
 
 ### TODO
 
-- [ ] render blockquotes
+
 - [ ] render nested lists
-- [ ] render processing instructions
 - [ ] capture new lines in pre
-- [ ] capture links betwixt &lt; &gt;
-- [ ] titles in anchors and image captures
 - [ ] DOM back to markdown
 - [ ] design method to render figure and figcaptions (using context callback from preceding prob.. see note)
-- [ ] replace ' with actual apostrophe
+- [x] replace ' with actual apostrophe
 - [ ] think of syntax for definition lists
-
+- [ ] Add callback for time elements
+- [x] titles in anchors and image captures
+- [x] render processing instructions
+- [x] capture links betwixt &lt; &gt; (not implemented, but adde regex in note.)
 - [x] render lists
 - [x] render headings
 - [x] render links
 - [x] render images
 - [x] render Inline elements
+- [x] render blockquotes
 - [x] render pre
 - [x] section-izing parser callback implementation
 - [x] deal with & and other entities

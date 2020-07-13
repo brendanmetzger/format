@@ -1,3 +1,5 @@
+?publish 8
+?route something/special
 # Meeting / reviews / correspondance
 
 ## ``02/07/2020 6:00am``
@@ -46,9 +48,8 @@ Conversed about the state of identifying errors and shutdowns when they occur, a
 - try to meaningfully document how things can/will/have improve with efforts begun here
 - develop interesting use-cases that can offer potential for buy-in
 - make case for new platforms in terms of how much time/money/energy/etc. they might save
-- year one goal is to clean house
+- year one goal is to clean house and figrue’s out
 
-I've started authoring a file called `model.xml` which will be supplemented with information I gather as process continues (roles, utilization of technology, etc.) that can be parsed and compiled in myriad ways according to any reporting needed.
 
 ---
 
@@ -93,3 +94,5 @@ Interval one will adhere to the interval outlined in the [original proposal](med
 // insert standard-contract-footnotes.md
 
 ![an image](/path/to/image.jpg)
+
+I have started authoring a that's called `model.xml` which will be I'm not sure I can't figure this one out. supplemented with information I gather as process continues (roles, utilization of technology, etc.) that can be parsed and compiled in myriad ways according to any reporting needed.

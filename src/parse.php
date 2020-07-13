@@ -38,8 +38,8 @@ class Parse {
 class Token {
   
   const BLOCK = [
-    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  ,'comment',  'p'  ],
-    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/' , '\S'  ],
+    'name' => [ 'ol'    , 'ul' ,  'h%d'  ,  'pre' , 'blockquote',  'hr'  ,'comment', 'pi', 'p' ],
+    'rgxp' => ['\d+\. ?', '- ' ,'#{1,6}' , '`{3}' ,   '> ?'     , '-{3,}',  '\/\/' , '\?', '\S'],
   ];
   
   const INLINE = [
@@ -58,7 +58,7 @@ class Token {
   function __construct($data) {
     foreach ($data as $prop => $value) $this->{$prop} = $value;
     $this->value =  trim(substr($this->text, $this->name == 'p' ? 0 : $this->trim * $this->depth));
-    if ($this->context = in_array($this->name, ['pre', 'ol','ul'])) {
+    if ($this->context = in_array($this->name, ['pre','ol','ul','blockquote'])) {
      $this->element = ['pre' => 'code', 'blockquote' => 'p'][$this->name] ?? 'li'; 
     }
   }
@@ -146,6 +146,9 @@ class Block {
     if ($token->name == 'comment')
       return $context->appendChild(new DOMComment($token->value));
 
+    if ($token->name == 'pi' && $doc = $context->ownerDocument)
+      return $doc->insertBefore(new DOMProcessingInstruction(...explode(' ', $token->value, 2)), $doc->firstChild);
+    
     # TODO check the depth and decide if it's time to move up or down (might be a good fit for diatom Element enhancments)
     if ($token->element && $context->nodeName != $token->name)
      $context = $context->appendChild(new DOMElement($token->name));
@@ -157,7 +160,7 @@ class Block {
     if ($token->name === 'pre')
       return $element->appendChild(new DOMCdataSection($token->text));
     
-    $element->nodeValue = htmlspecialchars($token->value);
+    $element->nodeValue = preg_replace('/(?<=\S)\'/u', '’', htmlspecialchars($token->value));
     Inline::format($element);
 
     return $context;
@@ -173,6 +176,9 @@ class Block {
   and can do things like $this->splitText($offset)...
 */
 
+# note: (?<=<)(?:https?:\/)\/(.+?)(?=\/).*(?=>) can find links with the <> format.
+#       I do not use in my projects and encurage the more the explicit format.
+
 class Inline {
   private static $rgxp = null;
   
@@ -180,8 +186,8 @@ class Inline {
   
   public function __construct(DOMElement $node) {
     self::$rgxp ??= [
-      'pair' => sprintf('/(%s)(?:(?!\1).)+\1/u', join('|', array_map(fn($k)=> addcslashes($k, '!..~'), array_keys(Token::INLINE)))),
-      'link' => '/(!?)\[([^\]]+)\]\((\S+)\)/u'
+      'pair' => sprintf('/(%s)((?:(?!\1).)+)\1/u', join('|', array_map(fn($k)=> addcslashes($k, '!..~'), array_keys(Token::INLINE)))),
+      'link' => '/(!?)\[([^\]]+)\]\((\S+)\s*(?:\"(.*)\")?\)/u'
     ];
     
     $this->DOM  = $node->ownerDocument;
@@ -203,7 +209,7 @@ class Inline {
       array_push($matches, ...$this->gather('/^\[([x\s])\](.*)$/u', $text, [$this, 'input']));
     
     usort($matches, fn($A, $B)=> $B[0] <=> $A[0]);
-    
+    $cursor = 0;
     foreach ($matches as $i => [$in, $out, $end, $elem]) {
       // skip nested.. parsed separately
       if (($matches[$i+1][2] ?? 0) > $end) continue;
@@ -224,46 +230,55 @@ class Inline {
   public function gather($rgxp, $text, callable $callback)
   {
     preg_match_all($rgxp, $text, $matches, PREG_OFFSET_CAPTURE|PREG_SET_ORDER);
-    return array_map($callback, $matches);
+    return array_map(fn($match) => $callback($text, ...$match), $matches);
+  }
+  
+  private function offsets($line, $match) {
+    $in  = mb_strlen(substr($line, 0, $match[1]));
+    $out = mb_strlen($match[0]);
+    return [$in, $out, $in+$out];
   }
     
-  private function basic($match)
-  {
-    $symbol = $match[1][0];
-    $node   = new DOMElement(Token::INLINE[$symbol], trim($match[0][0], $symbol));
-    $out = mb_strlen($match[0][0]);
-    return [$match[0][1], $out, $match[0][1] + $out, $node];
+  private function basic($line, $match, $symbol, $text) {
+    $node   = new DOMElement(Token::INLINE[$symbol[0]], $text[0]);
+    return [...$this->offsets($line, $match), $node];
   }
   
-  private function tag($match)
+  private function tag($line, $match, $tag, $text)
   {
-    $node = $this->DOM->createElement('span', trim($match[2][0]));
-    $node->setAttribute('class', "tag {$match[1][0]}");
-    $out = mb_strlen($match[0][0]);
-    return [$match[0][1], $out, $match[0][1] + $out, $node];
+    $node = $this->DOM->createElement('span', trim($text[0]));
+    $node->setAttribute('class', "tag {$tag[0]}");
+
+    return [...$this->offsets($line, $match), $node];
   }
   
-  private function link($match)
+  private function link($line, $match, $flag, $text, $url, $caption = null)
   {
-    if ($match[1][0]) {
+    if ($flag[0]) {
       $node = $this->DOM->createElement('img');
-      $node->setAttribute('src', $match[3][0]);
-      $node->setAttribute('alt',  $match[2][0]);
+      $node->setAttribute('src', $url[0]);
+      $node->setAttribute('alt',  $text[0]);
     } else {
-      $node = $this->DOM->createElement('a', $match[2][0]);
-      $node->setAttribute('href', $match[3][0]);
+      
+      $node = $this->DOM->createElement('a', $text[0]);
+      $node->setAttribute('href', $url[0]);
     }
-    $out = mb_strlen($match[0][0]);
-    return [$match[0][1], $out, $match[0][1] + $out, $node];
+    
+    if ($caption[0] ?? false) {
+      $node->setAttribute('title', $caption[0]);
+    }
+    
+    return [...$this->offsets($line, $match), $node];
   }
 
-  private function input($match)
+  private function input($line, $match, $checked, $text)
   {
-    $node = $this->DOM->createElement('label', $match[2][0]);
+    $node = $this->DOM->createElement('label', $text[0]);
     $input = $node->insertBefore($this->DOM->createElement('input'), $node->firstChild);
     $input->setAttribute('type', 'checkbox');
-    if ($match[1][0] != ' ') $input->setAttribute('checked', 'checked');
-    $out = mb_strlen($match[0][0]);
+    if ($checked[0] != ' ') $input->setAttribute('checked', 'checked');
+    $out = mb_strlen($match[0]);
     return [0, $out, $out, $node];
   }
 }
+ 
